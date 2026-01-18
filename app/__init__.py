@@ -39,6 +39,11 @@ def create_app():
     from .routes.scheduleRoute import schedule_bp
 
     app.register_blueprint(schedule_bp, url_prefix="/api")
+
+    from .routes.leave import leave_bp
+
+    app.register_blueprint(leave_bp, url_prefix="/api")
+
     with app.app_context():
         db.create_all()  # Creates tables based on models.py
 
