@@ -43,6 +43,9 @@ def create_app():
     from .routes.leave import leave_bp
 
     app.register_blueprint(leave_bp, url_prefix="/api")
+    from .routes.exclusion_routes import exclusion_bp
+
+    app.register_blueprint(exclusion_bp, url_prefix="/api")
 
     with app.app_context():
         db.create_all()  # Creates tables based on models.py

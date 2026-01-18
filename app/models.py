@@ -138,6 +138,10 @@ class Schedule(db.Model):
     assignments: Mapped[List["Assignment"]] = relationship(
         back_populates="schedule", cascade="all, delete-orphan"
     )
+    # Add this relationship
+    required_stations: Mapped[List["ScheduleStation"]] = relationship(
+        back_populates="schedule", cascade="all, delete-orphan"
+    )
 
     def to_dict(self, summary_only=True):
         # 1. Manually build the dictionary instead of using super()
@@ -157,6 +161,7 @@ class Schedule(db.Model):
             print(f"DEBUG: INCLUDING DAYS FOR {self.name}")
             data["days"] = [d.to_dict() for d in self.days]
             data["memberships"] = [m.to_dict() for m in self.memberships]
+            data["required_stations"] = [s.to_dict() for s in self.required_stations]
 
         return data
 
@@ -254,49 +259,61 @@ class ScheduleMembership(db.Model):
 
 
 class Assignment(db.Model):
-    __tablename__ = "assignments"
-    id: Mapped[int] = mapped_column(primary_key=True)
-    is_locked: Mapped[bool] = mapped_column(Boolean, default=False)
+    """
+    Represents a single 'shift' or 'slot' on a specific day.
+    Example: Jan 1st | OOD | [Empty or Person ID]
+    """
 
+    __tablename__ = "assignments"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    # 1. The Time (Links to the specific generated day)
     day_id: Mapped[int] = mapped_column(
         ForeignKey("schedule_days.id", ondelete="CASCADE"), nullable=False
     )
+
+    # 2. The Role (Links to the WatchStation definition)
+    station_id: Mapped[int] = mapped_column(
+        ForeignKey("watch_stations.id", ondelete="CASCADE"), nullable=False
+    )
+
+    # 3. The Schedule (For faster querying)
     schedule_id: Mapped[int] = mapped_column(
         ForeignKey("schedules.id", ondelete="CASCADE"), nullable=False
     )
-    station_id: Mapped[int] = mapped_column(
-        ForeignKey("watch_stations.id"), nullable=False
-    )
 
-    # RECOMMENDED CHANGE: Point to membership instead of person
+    # 4. The Person (Nullable - The solver fills this in)
     membership_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("schedule_memberships.id", ondelete="SET NULL"), nullable=True
     )
 
+    # 5. Lock Flag (If True, the solver cannot move this person)
+    is_locked: Mapped[bool] = mapped_column(Boolean, default=False)
+
     # Relationships
-    schedule: Mapped["Schedule"] = relationship(back_populates="assignments")
     day: Mapped["ScheduleDay"] = relationship(back_populates="assignments")
     station: Mapped["WatchStation"] = relationship()
-
-    # Updated relationship to membership
-    membership: Mapped[Optional["ScheduleMembership"]] = relationship()
+    membership: Mapped[Optional["ScheduleMembership"]] = relationship(
+        back_populates="assignments"
+    )
+    schedule: Mapped["Schedule"] = relationship()
 
     def to_dict(self):
         return {
             "id": self.id,
-            "is_locked": self.is_locked,
             "day_id": self.day_id,
-            "schedule_id": self.schedule_id,
-            "station_id": self.station_id,
-            "membership_id": self.membership_id,
-            # Helper fields for the frontend grid
-            "person_name": (
-                self.membership.person.name
-                if self.membership and self.membership.person
-                else "Unassigned"
-            ),
-            "station_name": self.station.name if self.station else None,
             "date": self.day.date.isoformat() if self.day else None,
+            "station_id": self.station_id,
+            "station_name": self.station.name if self.station else "Unknown",
+            "membership_id": self.membership_id,
+            # Helper to get the person's name if assigned
+            "assigned_person_name": (
+                self.membership.person.name
+                if (self.membership and self.membership.person)
+                else None
+            ),
+            "is_locked": self.is_locked,
         }
 
 
@@ -390,4 +407,42 @@ class MembershipStationWeight(db.Model):
             "station_id": self.station_id,
             "station_name": self.station.name if self.station else None,
             "weight": self.weight,
+        }
+
+
+class ScheduleStation(db.Model):
+    """
+    Acts as a 'Template' or 'Rule' for the schedule.
+    If a record exists here, the generator creates a slot for this station every day.
+    """
+
+    __tablename__ = "schedule_stations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    # Links the rule to the specific schedule
+    schedule_id: Mapped[int] = mapped_column(
+        ForeignKey("schedules.id", ondelete="CASCADE"), nullable=False
+    )
+    # Links to the master WatchStation (OOD, JOOD, etc.)
+    station_id: Mapped[int] = mapped_column(
+        ForeignKey("watch_stations.id", ondelete="CASCADE"), nullable=False
+    )
+
+    # Relationships
+    schedule: Mapped["Schedule"] = relationship(back_populates="required_stations")
+    station: Mapped["WatchStation"] = relationship()
+
+    # Prevent adding the same station twice to the same schedule
+    __table_args__ = (
+        UniqueConstraint("schedule_id", "station_id", name="_schedule_station_uc"),
+    )
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "schedule_id": self.schedule_id,
+            "station_id": self.station_id,
+            # Helper to show the name in the UI without extra queries
+            "station_name": self.station.name if self.station else "Unknown",
         }
