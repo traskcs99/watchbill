@@ -1,6 +1,6 @@
 from flask import Blueprint, jsonify, request
 from ..database import db
-from ..models import Person, WatchStation, Qualification
+from ..models import Person, MasterStation, Qualification
 from datetime import date
 
 qualifications_bp = Blueprint("qualifications", __name__)

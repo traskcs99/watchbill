@@ -1,5 +1,5 @@
 import pytest
-from app.models import Person, WatchStation, Qualification, Group
+from app.models import Person, MasterStation, Qualification, Group
 from app.database import db
 
 
@@ -17,7 +17,7 @@ def setup_data(session):
     db.session.flush()
 
     person = Person(name="Test Sailor", group_id=group.id)
-    station = WatchStation(name="Officer of the Deck", abbr="OOD")
+    station = MasterStation(name="Officer of the Deck", abbr="OOD")
     db.session.add_all([person, station])
     db.session.commit()
 

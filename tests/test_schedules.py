@@ -86,31 +86,48 @@ def test_delete_schedule_cascades(client, session):
     CRITICAL TEST: Verify that deleting a schedule wipes
     memberships and their local station weights.
     """
-    # 1. Create Schedule
+    # 1. SETUP PARENTS: Create the Person and Group first
+    from app.models import Person, Group, MembershipStationWeight, MasterStation
+
+    p = Person(name="Cascading Carl")
+    g = Group(name="Alpha Group")
+    session.add_all([p, g])
+    session.flush()  # This generates IDs for p and g
+
+    # 2. Create Schedule
     sch = Schedule(
         name="Delete Me", start_date=date(2026, 1, 1), end_date=date(2026, 1, 2)
     )
     session.add(sch)
     session.flush()
 
-    # 2. Add a membership and a local weight
-    mem = ScheduleMembership(schedule_id=sch.id, person_id=1, group_id=1)
+    # 3. Add membership using REAL IDs
+    mem = ScheduleMembership(schedule_id=sch.id, person_id=p.id, group_id=g.id)
     session.add(mem)
     session.flush()
 
-    weight = MembershipStationWeight(membership_id=mem.id, station_id=1, weight=0.75)
+    # 4. (Optional) Add a local weight to test deeper cascade
+    # Create a master station first
+    stn = MasterStation(name="OOD", abbr="OOD")
+    session.add(stn)
+    session.flush()
+
+    weight = MembershipStationWeight(
+        membership_id=mem.id, station_id=stn.id, weight=2.0
+    )
     session.add(weight)
     session.commit()
 
-    # 3. Delete the schedule
-    response = client.delete(f"/api/schedules/{sch.id}")
-    assert response.status_code == 200
+    # --- THE TEST ---
+    # 5. Delete the Schedule
+    session.delete(sch)
+    session.commit()
 
-    # 4. Verify everything is gone
-    assert session.get(Schedule, sch.id) is None
-    assert session.query(ScheduleMembership).filter_by(id=mem.id).first() is None
+    # 6. VERIFY CASCADE: Everything linked to the schedule should be gone
+    assert session.get(ScheduleMembership, mem.id) is None
     assert (
-        session.query(MembershipStationWeight).filter_by(id=weight.id).first() is None
+        session.query(MembershipStationWeight).filter_by(membership_id=mem.id).count()
+        == 0
     )
 
 

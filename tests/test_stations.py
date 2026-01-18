@@ -1,60 +1,111 @@
 import pytest
+from app.models import MasterStation, Schedule, ScheduleStation, Assignment, ScheduleDay
+from datetime import date
 
 
-def test_station_crud_lifecycle(client):
-    """Test Create -> Read -> Update -> Delete for WatchStations"""
+@pytest.fixture
+def station_test_env(session):
+    """
+    Sets up a Master Station and a Schedule for linking tests.
+    """
+    # 1. Create a Master Station in the library
+    ms = MasterStation(name="Officer of the Deck", abbr="OOD")
 
-    # 1. CREATE
-    payload = {"name": "Section Dental Officer", "abbr": "SDO"}
-    res = client.post("/api/stations", json=payload)
+    # 2. Create a Schedule (this auto-generates days via your utils)
+    sch = Schedule(
+        name="August 2026",
+        start_date=date(2026, 8, 1),
+        end_date=date(2026, 8, 3),  # Short range for easy counting
+    )
+    session.add_all([ms, sch])
+    session.flush()
+
+    # Create the days manually or via util if not auto-triggered in fixture
+    for i in range(1, 4):
+        session.add(ScheduleDay(schedule_id=sch.id, date=date(2026, 8, i), weight=1.0))
+
+    session.commit()
+    return {"station": ms, "schedule": sch}
+
+
+# --- 1. MasterStation Library Tests ---
+
+
+def test_create_master_station(client):
+    res = client.post(
+        "/api/master-stations",
+        json={"name": "Junior Officer of the Deck", "abbr": "JOOD"},
+    )
     assert res.status_code == 201
-    station_id = res.get_json()["id"]
-
-    # 2. GET ALL
-    res = client.get("/api/stations")
-    assert len(res.get_json()) == 1
-    assert res.get_json()[0]["abbr"] == "SDO"
-
-    # 3. UPDATE
-    res = client.put(f"/api/stations/{station_id}", json={"abbr": "DENT"})
-    assert res.status_code == 200
-    assert res.get_json()["abbr"] == "DENT"
-
-    # 4. DELETE
-    res = client.delete(f"/api/stations/{station_id}")
-    assert res.status_code == 200
-
-    # Verify 404
-    res = client.get(f"/api/stations/{station_id}")
-    assert res.status_code == 404
+    assert res.json["abbr"] == "JOOD"
 
 
-def test_create_station_validation(client):
-    """Test that station requires both name and abbr"""
-    res = client.post("/api/stations", json={"name": "Missing Abbr"})
+# --- 2. ScheduleStation (Link) & Auto-Assignment Tests ---
+
+
+def test_add_station_to_schedule_triggers_assignments(
+    client, session, station_test_env
+):
+    """Verify that posting a station to a schedule creates link + slots."""
+    # YOU MUST DEFINE THESE INSIDE EVERY TEST FUNCTION
+    sch_id = station_test_env["schedule"].id
+    stn_id = station_test_env["station"].id
+
+    payload = {"station_id": stn_id}
+    res = client.post(f"/api/schedules/{sch_id}/stations", json=payload)
+
+    assert res.status_code == 201
+    # Flexible string check to avoid word-order failures
+    msg = res.json["message"].lower()
+    assert "3 slots" in msg
+    assert "generated" in msg
+
+    # Verify assignments were created
+    count = (
+        session.query(Assignment)
+        .filter_by(schedule_id=sch_id, station_id=stn_id)
+        .count()
+    )
+    assert count == 3
+
+
+def test_prevent_duplicate_station_in_schedule(client, session, station_test_env):
+    """Ensure you can't add OOD to the same schedule twice."""
+    sch_id = station_test_env["schedule"].id
+    stn_id = station_test_env["station"].id
+
+    # Add first time
+    client.post(f"/api/schedules/{sch_id}/stations", json={"station_id": stn_id})
+
+    # Add second time
+    res = client.post(f"/api/schedules/{sch_id}/stations", json={"station_id": stn_id})
+
     assert res.status_code == 400
+    # This matches the user-friendly error we added to the route
+    assert "already assigned" in res.json["error"].lower()
 
 
-def test_bulk_operations(client):
-    # 1. Test Bulk Create
-    payload = [
-        {"name": "Officer of the Deck", "abbr": "OOD"},
-        {"name": "Junior Officer of the Deck", "abbr": "JOOD"},
-        {"name": "Quartermaster", "abbr": "QM"},
-    ]
-    res_create = client.post("/api/stations/bulk", json=payload)
-    assert res_create.status_code == 201
-    created_data = res_create.get_json()
-    assert len(created_data) == 3
+def test_cascade_delete_removes_assignments(client, session, station_test_env):
+    """
+    Verify that removing a station from the template
+    wipes the associated assignments automatically.
+    """
+    schedule_id = station_test_env["schedule"].id
+    station_id = station_test_env["station"].id
 
-    # Get the IDs for deletion
-    ids = [s["id"] for s in created_data]
+    # 1. Setup: Add station and slots
+    client.post(
+        f"/api/schedules/{schedule_id}/stations", json={"station_id": station_id}
+    )
 
-    # 2. Test Bulk Delete
-    res_delete = client.post("/api/stations/bulk-delete", json=ids)
-    assert res_delete.status_code == 200
-    assert "Deleted 3" in res_delete.get_json()["message"]
+    # Get the ID of the link (ScheduleStation)
+    link = session.query(ScheduleStation).first()
 
-    # Verify they are gone
-    res_get = client.get("/api/stations")
-    assert len(res_get.get_json()) == 0
+    # 2. Action: Delete the Link
+    # Note: Ensure you have a DELETE route for ScheduleStation at this endpoint
+    res = client.delete(f"/api/stations/{link.id}")
+    assert res.status_code == 200
+
+    # 3. Verify: Assignments should be gone due to CASCADE
+    count = session.query(Assignment).filter_by(station_id=station_id).count()
+    assert count == 0

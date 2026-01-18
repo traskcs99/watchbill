@@ -46,6 +46,20 @@ def create_app():
     from .routes.exclusion_routes import exclusion_bp
 
     app.register_blueprint(exclusion_bp, url_prefix="/api")
+    from .routes.masterstation_route import master_station_bp
+
+    app.register_blueprint(master_station_bp, url_prefix="/api")
+    from .routes.assignment_routes import assignment_bp
+
+    app.register_blueprint(assignment_bp, url_prefix="/api")
+
+    from .routes.scheduleDay_route import day_bp
+
+    app.register_blueprint(day_bp, url_prefix="/api")
+
+    from .routes.membership_station_route import membership_station_bp
+
+    app.register_blueprint(membership_station_bp, url_prefix="/api")
 
     with app.app_context():
         db.create_all()  # Creates tables based on models.py

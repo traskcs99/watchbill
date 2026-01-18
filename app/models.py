@@ -71,14 +71,18 @@ class Person(db.Model):
         }
 
 
-class WatchStation(db.Model):
-    __tablename__ = "watch_stations"
+class MasterStation(db.Model):
+    """
+    The GLOBAL library of all possible watch roles (OOD, JOOD, etc).
+    """
+
+    __tablename__ = "master_stations"
+
     id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(String(100), nullable=False)
-    abbr: Mapped[str] = mapped_column(String(10), nullable=False)
+    name: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+    abbr: Mapped[str] = mapped_column(String(10), unique=True, nullable=False)
     qualified_personnel: Mapped[List["Qualification"]] = relationship(
-        back_populates="station",  # Link to the field name in Qualification
-        cascade="all, delete-orphan",
+        back_populates="station", cascade="all, delete-orphan"
     )
 
     def to_dict(self):
@@ -100,7 +104,7 @@ class Qualification(db.Model):
         ForeignKey("personnel.id", ondelete="CASCADE"), nullable=False
     )
     station_id: Mapped[int] = mapped_column(
-        ForeignKey("watch_stations.id", ondelete="CASCADE"), nullable=False
+        ForeignKey("master_stations.id", ondelete="CASCADE"), nullable=False
     )
 
     # Optional but highly recommended metadata
@@ -109,7 +113,9 @@ class Qualification(db.Model):
 
     # Relationships to make code cleaner
     person: Mapped["Person"] = relationship(back_populates="qualifications")
-    station: Mapped["WatchStation"] = relationship(back_populates="qualified_personnel")
+    station: Mapped["MasterStation"] = relationship(
+        back_populates="qualified_personnel"
+    )
 
     # Ensure a person can't be qualified for the same station twice
     __table_args__ = (
@@ -259,41 +265,40 @@ class ScheduleMembership(db.Model):
 
 
 class Assignment(db.Model):
-    """
-    Represents a single 'shift' or 'slot' on a specific day.
-    Example: Jan 1st | OOD | [Empty or Person ID]
-    """
-
     __tablename__ = "assignments"
 
     id: Mapped[int] = mapped_column(primary_key=True)
 
-    # 1. The Time (Links to the specific generated day)
+    # 1. The Time
     day_id: Mapped[int] = mapped_column(
         ForeignKey("schedule_days.id", ondelete="CASCADE"), nullable=False
     )
 
-    # 2. The Role (Links to the WatchStation definition)
+    # 2. The Role (Only define this ONCE)
     station_id: Mapped[int] = mapped_column(
-        ForeignKey("watch_stations.id", ondelete="CASCADE"), nullable=False
+        ForeignKey("master_stations.id", ondelete="CASCADE"), nullable=False
     )
 
-    # 3. The Schedule (For faster querying)
+    # 3. The Schedule
     schedule_id: Mapped[int] = mapped_column(
         ForeignKey("schedules.id", ondelete="CASCADE"), nullable=False
     )
 
-    # 4. The Person (Nullable - The solver fills this in)
+    # 4. The Person
     membership_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("schedule_memberships.id", ondelete="SET NULL"), nullable=True
     )
 
-    # 5. Lock Flag (If True, the solver cannot move this person)
+    # 5. Lock Flag
     is_locked: Mapped[bool] = mapped_column(Boolean, default=False)
+    availability_estimate: Mapped[float] = mapped_column(
+        db.Float, default=0.0, nullable=False
+    )
 
     # Relationships
     day: Mapped["ScheduleDay"] = relationship(back_populates="assignments")
-    station: Mapped["WatchStation"] = relationship()
+    # Link to MasterStation
+    master_station: Mapped["MasterStation"] = relationship()
     membership: Mapped[Optional["ScheduleMembership"]] = relationship(
         back_populates="assignments"
     )
@@ -305,15 +310,18 @@ class Assignment(db.Model):
             "day_id": self.day_id,
             "date": self.day.date.isoformat() if self.day else None,
             "station_id": self.station_id,
-            "station_name": self.station.name if self.station else "Unknown",
+            "station_name": (
+                self.master_station.name if self.master_station else "Unknown"
+            ),
             "membership_id": self.membership_id,
-            # Helper to get the person's name if assigned
+            # Accessing nested person name
             "assigned_person_name": (
                 self.membership.person.name
                 if (self.membership and self.membership.person)
                 else None
             ),
             "is_locked": self.is_locked,
+            "availability_estimate": self.availability_estimate,
         }
 
 
@@ -389,7 +397,7 @@ class MembershipStationWeight(db.Model):
         ForeignKey("schedule_memberships.id", ondelete="CASCADE"), nullable=False
     )
     station_id: Mapped[int] = mapped_column(
-        ForeignKey("watch_stations.id", ondelete="CASCADE"), nullable=False
+        ForeignKey("master_stations.id", ondelete="CASCADE"), nullable=False
     )
     weight: Mapped[float] = mapped_column(db.Float, default=1.0)
 
@@ -398,7 +406,7 @@ class MembershipStationWeight(db.Model):
         back_populates="station_weights"
     )
     # Relationship to get the station name easily
-    station: Mapped["WatchStation"] = relationship()
+    station: Mapped["MasterStation"] = relationship()
 
     def to_dict(self):
         return {
@@ -412,28 +420,24 @@ class MembershipStationWeight(db.Model):
 
 class ScheduleStation(db.Model):
     """
-    Acts as a 'Template' or 'Rule' for the schedule.
-    If a record exists here, the generator creates a slot for this station every day.
+    The TEMPLATE: Links a MasterStation to a specific Schedule.
     """
 
     __tablename__ = "schedule_stations"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-
-    # Links the rule to the specific schedule
     schedule_id: Mapped[int] = mapped_column(
         ForeignKey("schedules.id", ondelete="CASCADE"), nullable=False
     )
-    # Links to the master WatchStation (OOD, JOOD, etc.)
+    # Renamed foreign key to point to master_stations
     station_id: Mapped[int] = mapped_column(
-        ForeignKey("watch_stations.id", ondelete="CASCADE"), nullable=False
+        ForeignKey("master_stations.id", ondelete="CASCADE"), nullable=False
     )
 
     # Relationships
     schedule: Mapped["Schedule"] = relationship(back_populates="required_stations")
-    station: Mapped["WatchStation"] = relationship()
+    master_station: Mapped["MasterStation"] = relationship()
 
-    # Prevent adding the same station twice to the same schedule
     __table_args__ = (
         UniqueConstraint("schedule_id", "station_id", name="_schedule_station_uc"),
     )
@@ -443,6 +447,6 @@ class ScheduleStation(db.Model):
             "id": self.id,
             "schedule_id": self.schedule_id,
             "station_id": self.station_id,
-            # Helper to show the name in the UI without extra queries
-            "station_name": self.station.name if self.station else "Unknown",
+            "name": self.master_station.name if self.master_station else None,
+            "abbr": self.master_station.abbr if self.master_station else None,
         }

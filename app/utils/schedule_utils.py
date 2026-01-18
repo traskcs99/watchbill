@@ -6,7 +6,9 @@ from app.models import (
     Qualification,
     ScheduleDay,
     Holiday,
+    Assignment,
 )
+
 from datetime import timedelta
 
 
@@ -63,6 +65,15 @@ def generate_schedule_days(schedule):
 
     current_date = schedule.start_date
     days_to_add = []
+    weekdays_map = [
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+        "Sunday",
+    ]
 
     while current_date <= schedule.end_date:
         weekday = current_date.weekday()  # 0=Mon, 4=Fri, 5=Sat, 6=Sun
@@ -75,7 +86,8 @@ def generate_schedule_days(schedule):
         else:  # Sat, Sun
             day_weight = 2.0
 
-        day_name = ""
+        # Default name is the Day of the Week
+        day_name = weekdays_map[weekday]
         is_holiday = False
 
         # Holiday Override Logic
@@ -89,6 +101,7 @@ def generate_schedule_days(schedule):
             date=current_date,
             weight=day_weight,
             name=day_name,
+            label=None,
             is_holiday=is_holiday,
         )
         days_to_add.append(new_day)
@@ -96,3 +109,29 @@ def generate_schedule_days(schedule):
 
     db.session.add_all(days_to_add)
     # The route will handle the commit
+
+
+# app/utils/schedule_utils.py
+
+
+def generate_assignments_for_station(db_session, schedule, station_id):
+    """
+    Generates empty Assignment slots for every day in a schedule
+    for a specific MasterStation.
+    """
+    new_slots = []
+
+    # schedule.days is available if you used the relationship back_populates
+    for day in schedule.days:
+        new_slots.append(
+            Assignment(
+                schedule_id=schedule.id,
+                day_id=day.id,
+                station_id=station_id,
+                membership_id=None,
+                availability_estimate=0.0,
+            )
+        )
+
+    db_session.add_all(new_slots)
+    return len(new_slots)
