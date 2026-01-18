@@ -8,6 +8,7 @@ from ..models import (
     ScheduleDay,
 )
 from ..utils.schedule_utils import generate_schedule_days
+from ..utils.schedule_summary_util import get_schedule_summary_data
 from datetime import datetime
 
 schedule_bp = Blueprint("schedules", __name__)
@@ -98,3 +99,17 @@ def delete_schedule(id):
         jsonify({"message": "Schedule and all related data successfully deleted"}),
         200,
     )
+
+
+@schedule_bp.route("/schedules/<int:id>/summary", methods=["GET"])
+def get_schedule_summary(id):
+    """
+    Returns high-level health metrics for a schedule.
+    Used by the frontend to determine if the solver can be run.
+    """
+    summary = get_schedule_summary_data(id)
+
+    if not summary:
+        return jsonify({"error": "Schedule not found"}), 404
+
+    return jsonify(summary), 200

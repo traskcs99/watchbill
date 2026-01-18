@@ -1,0 +1,17 @@
+# --- Core Framework ---
+Flask
+Flask-SQLAlchemy
+SQLAlchemy
+flask-cors
+
+# --- Utilities ---
+requests
+python-dotenv
+python-dateutil
+
+# --- Testing ---
+pytest
+pytest-flask
+
+# --- Server (Optional, for later) ---
+gunicorn
