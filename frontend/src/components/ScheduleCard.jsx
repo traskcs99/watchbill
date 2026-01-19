@@ -4,13 +4,14 @@ import {
     CardContent,
     Typography,
     Button,
+    IconButton,
     CardActions,
     Chip,
     Box
 } from '@mui/material';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
-
-export default function ScheduleCard({ schedule }) {
+import DeleteIcon from '@mui/icons-material/Delete';
+export default function ScheduleCard({ schedule, onDelete }) {
 
     // Helper to choose color based on status
     const getStatusColor = (status) => {
@@ -56,9 +57,17 @@ export default function ScheduleCard({ schedule }) {
                 <Button size="small" variant="contained" disableElevation>
                     Open
                 </Button>
-                <Button size="small" color="error">
-                    Delete
-                </Button>
+                <IconButton
+                    color="error"
+                    size="small"
+                    onClick={() => {
+                        if (window.confirm("Delete this schedule?")) {
+                            onDelete(schedule.id); // <--- CALLING THE PARENT FUNCTION
+                        }
+                    }}
+                >
+                    <DeleteIcon />
+                </IconButton>
             </CardActions>
         </Card>
     );

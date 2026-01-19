@@ -152,8 +152,6 @@ class Schedule(db.Model):
     def to_dict(self, summary_only=True):
         # 1. Manually build the dictionary instead of using super()
         # This confirms we are definitely inside THIS function
-        print(f"DEBUG: INSIDE SCHEDULE TO_DICT. Summary only: {summary_only}")
-
         data = {
             "id": self.id,
             "name": self.name,
