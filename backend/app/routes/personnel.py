@@ -38,10 +38,18 @@ def get_one(id):
 @person_bp.route("/personnel", methods=["POST"])
 def create():
     data = request.get_json()
+
     if not data or "name" not in data:
         return jsonify({"error": "Missing name"}), 400
 
-    new_person = Person(name=data["name"], is_active=data.get("is_active", True))
+    # Validate group_id (Optional but good practice)
+    group_id = data.get("group_id")
+    if group_id == "":  # Handle case where frontend sends empty string for "None"
+        group_id = None
+
+    new_person = Person(
+        name=data["name"], group_id=group_id, is_active=data.get("is_active", True)
+    )
     db.session.add(new_person)
     db.session.commit()
     return jsonify(new_person.to_dict()), 201
@@ -55,8 +63,20 @@ def update(id):
         return jsonify({"error": "Person not found"}), 404
 
     data = request.get_json()
-    person.name = data.get("name", person.name)
-    person.is_active = data.get("is_active", person.is_active)
+
+    # 1. Update Name (if provided)
+    if "name" in data:
+        person.name = data["name"]
+
+    # 2. Update Active Status (if provided)
+    if "is_active" in data:
+        person.is_active = data["is_active"]
+
+    # 3. Update Group (HANDLE THE EMPTY STRING BUG)
+    if "group_id" in data:
+        gid = data["group_id"]
+        # If frontend sends "" (empty string), save as None (NULL)
+        person.group_id = gid if gid != "" else None
 
     db.session.commit()
     return jsonify(person.to_dict())

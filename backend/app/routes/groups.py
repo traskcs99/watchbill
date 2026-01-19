@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from sqlalchemy import select
+from sqlalchemy import select, func
 from ..database import db
 from ..models import Group
 
@@ -17,17 +17,21 @@ def get_groups():
 
 @group_bp.route("/groups", methods=["POST"])
 def create_group():
-    data = request.get_json()
+    data = request.json
 
-    if not data or "name" not in data:
-        return jsonify({"error": "Group name is required"}), 400
+    # 1. Find the current highest priority
+    # "select max(priority) from groups"
+    max_priority = db.session.query(func.max(Group.priority)).scalar() or 0
+
+    # 2. Set new group to max + 1 (Bottom of list)
+    new_priority = max_priority + 1
 
     new_group = Group(
-        name=data["name"],
-        priority=data.get("priority", 1),
-        seniorityFactor=data.get("seniorityFactor", 1.0),
+        name=data.get("name"),
         min_assignments=data.get("min_assignments", 0),
-        max_assignments=data.get("max_assignments", 10),
+        max_assignments=data.get("max_assignments", 8),
+        seniorityFactor=data.get("seniorityFactor", 1.0),
+        priority=new_priority,  # <--- Auto-assigned
     )
 
     db.session.add(new_group)
@@ -41,13 +45,21 @@ def update_group(id):
     if not group:
         return jsonify({"error": "Group not found"}), 404
 
-    data = request.get_json()
+    data = request.json
 
-    # Update fields if they exist in the request, otherwise keep existing
-    group.name = data.get("name", group.name)
-    group.seniorityFactor = data.get("seniorityFactor", group.seniorityFactor)
-    group.min_assignments = data.get("min_assignments", group.min_assignments)
-    group.max_assignments = data.get("max_assignments", group.max_assignments)
+    # Update standard fields
+    if "name" in data:
+        group.name = data["name"]
+    if "min_assignments" in data:
+        group.min_assignments = data["min_assignments"]
+    if "max_assignments" in data:
+        group.max_assignments = data["max_assignments"]
+    if "seniorityFactor" in data:
+        group.seniorityFactor = data["seniorityFactor"]
+
+    # CRITICAL: We intentionally IGNORE 'priority' here.
+    # Even if the frontend sends it, we do not update it.
+    # Priority changes happen ONLY in the /reorder endpoint.
 
     db.session.commit()
     return jsonify(group.to_dict())
@@ -55,13 +67,24 @@ def update_group(id):
 
 @group_bp.route("/groups/<int:id>", methods=["DELETE"])
 def delete_group(id):
+    # 1. Find the group
     group = db.session.get(Group, id)
     if not group:
         return jsonify({"error": "Group not found"}), 404
 
+    # 2. Delete it
     db.session.delete(group)
+
+    # 3. Re-normalize the priorities of the REMAINING groups
+    # We fetch them ordered by their current priority to keep relative order
+    remaining_groups = Group.query.order_by(Group.priority).all()
+
+    for index, g in enumerate(remaining_groups):
+        # index starts at 0, so priority becomes 1, 2, 3...
+        g.priority = index + 1
+
     db.session.commit()
-    return jsonify({"message": f"Group '{group.name}' deleted successfully"}), 200
+    return jsonify({"message": "Group deleted and priorities reordered"}), 200
 
 
 @group_bp.route("/groups/bulk-update", methods=["PATCH"])
@@ -86,3 +109,22 @@ def bulk_update_groups():
 
     db.session.commit()
     return jsonify({"message": "Groups updated successfully"}), 200
+
+
+@group_bp.route("/groups/reorder", methods=["POST"])
+def reorder_groups():
+    # Expects a list of IDs in the new desired order: [3, 1, 5, 2]
+    new_order_ids = request.json.get("ids", [])
+
+    # Loop through the list and update priority based on index
+    # Index 0 = Priority 1 (Highest)
+    for index, group_id in enumerate(new_order_ids):
+        group = db.session.get(Group, group_id)  # SQLAlchemy 2.0 style
+        if not group:
+            group = Group.query.get(group_id)  # Legacy style fallback
+
+        if group:
+            group.priority = index + 1
+
+    db.session.commit()
+    return jsonify({"message": "Order updated successfully"}), 200

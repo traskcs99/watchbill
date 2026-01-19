@@ -1,13 +1,20 @@
 from flask import Flask
 from flask_cors import CORS
 from .database import db
+import os
+
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+INSTANCE_FOLDER_PATH = os.path.join(BASE_DIR, "instance")
 
 
 def create_app():
     app = Flask(__name__)
 
     # Configuration - update with your actual DB URI
-    app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///watchbill.db"
+    if not os.path.exists(INSTANCE_FOLDER_PATH):
+        os.makedirs(INSTANCE_FOLDER_PATH)
+    db_path = os.path.join(INSTANCE_FOLDER_PATH, "watchbill.db")
+    app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{db_path}"
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
     CORS(app)
