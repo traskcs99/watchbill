@@ -147,17 +147,17 @@ class Schedule(db.Model):
 
     # Cascades: If a Schedule is deleted, wipe all related child records
     memberships: Mapped[List["ScheduleMembership"]] = relationship(
-        back_populates="schedule", cascade="all, delete-orphan"
+        back_populates="schedule", cascade="all, delete-orphan", lazy="joined"
     )
     days: Mapped[List["ScheduleDay"]] = relationship(
-        back_populates="schedule", cascade="all, delete-orphan"
+        back_populates="schedule", cascade="all, delete-orphan", lazy="joined"
     )
     assignments: Mapped[List["Assignment"]] = relationship(
-        back_populates="schedule", cascade="all, delete-orphan"
+        back_populates="schedule", cascade="all, delete-orphan", lazy="joined"
     )
     # Add this relationship
     required_stations: Mapped[List["ScheduleStation"]] = relationship(
-        back_populates="schedule", cascade="all, delete-orphan"
+        back_populates="schedule", cascade="all, delete-orphan", lazy="joined"
     )
 
     def to_dict(self, summary_only=True):
@@ -170,6 +170,7 @@ class Schedule(db.Model):
             "end_date": self.end_date.isoformat() if self.end_date else None,
             "status": self.status,
             "member_count": len(self.memberships) if self.memberships else 0,
+            "required_stations": [s.to_dict() for s in self.required_stations],
         }
 
         if summary_only is False:

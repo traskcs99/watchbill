@@ -131,22 +131,26 @@ def generate_schedule_days(schedule):
 # app/utils/schedule_utils.py
 
 
-def generate_assignments_for_station(db_session, schedule, station_id):
+def generate_assignments_for_station(db_session, schedule, master_station_id):
     """
-    Generates empty Assignment slots for every day in a schedule
-    for a specific MasterStation.
+    Generates empty Assignment slots for every day in a schedule.
+    Uses master_station_id because the Assignment model links to MasterStation.
     """
     new_slots = []
 
-    # schedule.days is available if you used the relationship back_populates
+    # Ensure schedule.days exists (the fixture must have added them)
+    if not schedule.days:
+        return 0
+
     for day in schedule.days:
         new_slots.append(
             Assignment(
                 schedule_id=schedule.id,
                 day_id=day.id,
-                station_id=station_id,
+                station_id=master_station_id,  # Correct FK for your model
                 membership_id=None,
-                availability_estimate=0.0,
+                availability_estimate=1.0,
+                is_locked=False,
             )
         )
 

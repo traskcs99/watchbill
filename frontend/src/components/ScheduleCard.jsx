@@ -11,7 +11,13 @@ import {
 } from '@mui/material';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import DeleteIcon from '@mui/icons-material/Delete';
+import { useNavigate } from 'react-router-dom';
 export default function ScheduleCard({ schedule, onDelete }) {
+    const navigate = useNavigate();
+    const handleOpen = () => {
+        // Navigates to the route you defined in App.jsx: /schedules/:scheduleId
+        navigate(`/schedules/${schedule.id}`); //
+    };
 
     // Helper to choose color based on status
     const getStatusColor = (status) => {
@@ -54,7 +60,7 @@ export default function ScheduleCard({ schedule, onDelete }) {
             </CardContent>
 
             <CardActions>
-                <Button size="small" variant="contained" disableElevation>
+                <Button size="small" variant="contained" disableElevation onClick={handleOpen}>
                     Open
                 </Button>
                 <IconButton

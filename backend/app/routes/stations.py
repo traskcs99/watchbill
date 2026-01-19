@@ -2,7 +2,7 @@ from flask import Blueprint, request, jsonify
 from sqlalchemy import select, delete
 from sqlalchemy.exc import IntegrityError
 from ..database import db
-from ..models import MasterStation, ScheduleStation, Schedule
+from ..models import MasterStation, ScheduleStation, Schedule, Assignment
 from ..utils.schedule_utils import generate_assignments_for_station
 
 station_bp = Blueprint("stations", __name__)
@@ -38,15 +38,20 @@ def add_station_to_schedule(schedule_id):
     if not schedule:
         return jsonify({"error": "Schedule not found"}), 404
 
-    # 1. Create the Template Link
-    new_link = ScheduleStation(schedule_id=schedule_id, station_id=station_id)
-    db.session.add(new_link)
-
     try:
-        # Flush to check for duplicates (UniqueConstraint)
-        db.session.flush()
+        # 1. CLEANUP ORPHANS (The "Safety Switch")
+        # This prevents 500 errors if old data exists
+        Assignment.query.filter_by(
+            schedule_id=schedule_id, station_id=station_id
+        ).delete()
 
-        # 2. Call the Utility to handle assignment generation
+        # 2. CREATE THE LINK
+        new_link = ScheduleStation(schedule_id=schedule_id, station_id=station_id)
+        db.session.add(new_link)
+        db.session.flush()  # Generates new_link.id
+
+        # 3. GENERATE SLOTS
+        # Pass station_id (Master ID), not new_link.id
         count = generate_assignments_for_station(db.session, schedule, station_id)
 
         db.session.commit()
@@ -54,8 +59,8 @@ def add_station_to_schedule(schedule_id):
         return (
             jsonify(
                 {
-                    "message": f"Station linked and {count} slots generated.",
-                    "link": new_link.to_dict(),
+                    "message": f"Linked and {count} slots created.",
+                    "link": new_link.to_dict(),  # This fixes the KeyError: 'link'
                 }
             ),
             201,
@@ -63,10 +68,10 @@ def add_station_to_schedule(schedule_id):
 
     except IntegrityError:
         db.session.rollback()
-        # MATCH TEST EXPECTATION: "already assigned"
         return jsonify({"error": "Station is already assigned to this schedule"}), 400
     except Exception as e:
         db.session.rollback()
+        print(f"DEBUG ERROR: {str(e)}")  # This will show in your terminal
         return jsonify({"error": str(e)}), 500
 
 
@@ -129,3 +134,33 @@ def bulk_delete_stations():
     db.session.commit()
 
     return jsonify({"message": f"Deleted {result.rowcount} stations"}), 200
+
+
+@station_bp.route(
+    "/schedules/<int:schedule_id>/stations/<int:schedule_station_id>",
+    methods=["DELETE"],
+)
+def remove_station_to_schedule(schedule_id, schedule_station_id):
+    # 1. Get the link
+    link = db.session.get(ScheduleStation, schedule_station_id)
+    if not link:
+        return jsonify({"error": "Link not found"}), 404
+
+    # 2. Capture the station_id before we delete the link
+    target_station_id = link.station_id
+
+    # 3. Manually delete all assignments for this station in this schedule
+    # This is necessary because Assignment links to MasterStation, not the Link table
+    Assignment.query.filter_by(
+        schedule_id=schedule_id, station_id=target_station_id
+    ).delete()
+
+    # 4. Delete the link itself
+    db.session.delete(link)
+
+    try:
+        db.session.commit()
+        return jsonify({"message": "Station and associated slots removed"}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500

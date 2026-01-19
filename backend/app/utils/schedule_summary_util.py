@@ -113,6 +113,7 @@ def get_schedule_summary_data(schedule_id):
         "total_calendar_load": float(total_calendar_weight),  # Matches test expectation
         "station_health": station_analysis,
         "warnings": warnings,
+        "required_stations": [s.to_dict() for s in stations_in_schedule],
         "is_solvable": (
             all(s["assigned_members_count"] > 0 for s in station_analysis)
             if station_analysis

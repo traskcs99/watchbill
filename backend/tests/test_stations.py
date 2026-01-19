@@ -28,6 +28,32 @@ def station_test_env(session):
     return {"station": ms, "schedule": sch}
 
 
+@pytest.fixture
+def sample_station(session):
+    """Creates a master station for testing."""
+    station = MasterStation(name="Ship's Duty Officer", abbr="SDO")
+    session.add(station)
+    session.commit()
+    return station
+
+
+@pytest.fixture
+def sample_schedule(session):
+    sch = Schedule(
+        name="Test January",
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 1, 31),
+        status="draft",
+    )
+    # Just add the day to the list; SQLAlchemy handles the ID link on commit
+    day = ScheduleDay(date=date(2026, 1, 1), weight=1.0)
+    sch.days.append(day)
+
+    session.add(sch)
+    session.commit()
+    return sch
+
+
 # --- 1. MasterStation Library Tests ---
 
 
@@ -58,7 +84,7 @@ def test_add_station_to_schedule_triggers_assignments(
     # Flexible string check to avoid word-order failures
     msg = res.json["message"].lower()
     assert "3 slots" in msg
-    assert "generated" in msg
+    assert "created" in msg
 
     # Verify assignments were created
     count = (
@@ -109,3 +135,53 @@ def test_cascade_delete_removes_assignments(client, session, station_test_env):
     # 3. Verify: Assignments should be gone due to CASCADE
     count = session.query(Assignment).filter_by(station_id=station_id).count()
     assert count == 0
+
+
+def test_remove_station_from_schedule_success(
+    client, session, sample_schedule, sample_station
+):
+    """Test successfully removing a station from a schedule."""
+    # 1. Setup: Add the station first
+    res_add = client.post(
+        f"/api/schedules/{sample_schedule.id}/stations",
+        json={"station_id": sample_station.id},
+    )
+    link_id = res_add.get_json()["link"]["id"]
+
+    # 2. Action: Remove the station
+    res_del = client.delete(f"/api/schedules/{sample_schedule.id}/stations/{link_id}")
+
+    # 3. Assertions
+    assert res_del.status_code == 200
+    assert "removed" in res_del.get_json()["message"]
+
+    # 4. Verification: Check summary to ensure it's gone
+    res_sum = client.get(f"/api/schedules/{sample_schedule.id}/summary")
+    assert len(res_sum.get_json()["required_stations"]) == 0
+
+
+def test_remove_station_cascades_to_assignments(
+    client, session, sample_schedule, sample_station
+):
+    """Test that removing a station wipes all associated assignment slots."""
+    # 1. Add station (which triggers assignment generation)
+    res = client.post(
+        f"/api/schedules/{sample_schedule.id}/stations",
+        json={"station_id": sample_station.id},
+    )
+    link_id = res.get_json()["link"]["id"]
+
+    # Verify assignments exist (should be one for every day in schedule)
+    initial_count = (
+        session.query(Assignment).filter_by(schedule_id=sample_schedule.id).count()
+    )
+    assert initial_count > 0
+
+    # 2. Remove the station
+    client.delete(f"/api/schedules/{sample_schedule.id}/stations/{link_id}")
+
+    # 3. Verify assignments are GONE
+    final_count = (
+        session.query(Assignment).filter_by(schedule_id=sample_schedule.id).count()
+    )
+    assert final_count == 0

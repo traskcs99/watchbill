@@ -9,9 +9,11 @@ def create_app(config_class=Config):
     app = Flask(__name__)
     app.config.from_object(config_class)
 
-    # Initialize Extensions
     db.init_app(app)
-    migrate.init_app(app, db)
+
+    # Only initialize Migrate if we aren't in a test
+    if not app.config.get("TESTING"):
+        migrate.init_app(app, db)
     CORS(app)
 
     # Configuration - update with your actual DB URI

@@ -8,6 +8,7 @@ import Personnel from './pages/Personnel'; // <--- ADD THIS IMPORT!
 import Groups from './pages/Groups';
 import Stations from './pages/Stations';
 import Qualifications from './pages/Qualifications';
+import ScheduleWorkspace from './pages/ScheduleWorkspace';
 
 
 // Custom Command Theme
@@ -25,10 +26,14 @@ const theme = createTheme({
 // Helper component for Navigation
 function NavTabs() {
   const location = useLocation();
+  const mainPaths = ['/', '/groups', '/personnel', '/stations', '/quals'];
+
+  // 2. If the current URL is a main path, use it. Otherwise, use false (no tab highlighted)
+  const currentTab = mainPaths.includes(location.pathname) ? location.pathname : false;
   return (
     <Box sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'white' }}>
       <Tabs
-        value={location.pathname === '/' ? '/' : location.pathname}
+        value={currentTab} // Changed from location.pathname to currentTab
         centered
         textColor="primary"
         indicatorColor="primary"
@@ -37,7 +42,7 @@ function NavTabs() {
         <Tab label="Groups" value="/groups" component={Link} to="/groups" />
         <Tab label="Personnel" value="/personnel" component={Link} to="/personnel" />
         <Tab label="Stations" value="/stations" component={Link} to="/stations" />
-        <Tab label="Qualifications" value="/quals" component={Link} to="/quals" />
+        <Tab label="Quals" value="/quals" component={Link} to="/quals" />
       </Tabs>
     </Box>
   );
@@ -80,6 +85,7 @@ function App() {
                 <Route path="/personnel" element={<Personnel />} />
                 <Route path="/stations" element={<Stations />} />
                 <Route path="/quals" element={<Qualifications />} />
+                <Route path="/schedules/:scheduleId" element={<ScheduleWorkspace />} />
               </Routes>
             </Container>
           </Box>
