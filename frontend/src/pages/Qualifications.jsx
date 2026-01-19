@@ -1,17 +1,16 @@
 import { useState, useEffect } from 'react';
 import {
     Box, Typography, Paper, Table, TableBody, TableCell,
-    TableContainer, TableHead, TableRow, Checkbox, Chip, CircularProgress
+    TableContainer, TableHead, TableRow, Checkbox, CircularProgress, TextField, Chip, IconButton,
 } from '@mui/material';
+import EditIcon from '@mui/icons-material/Edit';
+import CancelIcon from '@mui/icons-material/Cancel'; // The "Red X"
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
-import CancelIcon from '@mui/icons-material/Cancel';
-
 export default function Qualifications() {
     const [people, setPeople] = useState([]);
     const [stations, setStations] = useState([]);
     const [loading, setLoading] = useState(true);
 
-    // 1. Fetch Data
     useEffect(() => {
         Promise.all([
             fetch('/api/personnel').then(res => res.json()),
@@ -22,64 +21,59 @@ export default function Qualifications() {
             setLoading(false);
         });
     }, []);
+    const formatToUS = (dateStr) => {
+        if (!dateStr) return "Set Date";
+        const [y, m, d] = dateStr.split('-');
+        return `${m}/${d}/${y}`;
+    };
 
-    // 2. The Smart Toggle Logic
+    // 1. New function to handle manual date changes (PATCH)
+    const handleDateChange = async (qualId, newDate) => {
+        try {
+            const res = await fetch(`/api/qualifications/${qualId}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ earned_date: newDate })
+            });
+            if (res.ok) {
+                refreshData();
+            }
+        } catch (err) {
+            console.error("Error updating date:", err);
+        }
+    };
+
     const handleToggle = async (personId, stationId) => {
-        // Find the person in our local state
-        const personIndex = people.findIndex(p => p.id === personId);
-        const person = people[personIndex];
-
-        // Check if they already have this qualification
+        const person = people.find(p => p.id === personId);
         const existingQual = person.qualifications.find(q => q.station_id === stationId);
 
         if (existingQual) {
-            // --- REVOKE (DELETE) ---
+            // REVOKE (DELETE)
             try {
-                // 1. Call Backend
                 const res = await fetch(`/api/qualifications/${existingQual.qual_id}`, {
                     method: 'DELETE'
                 });
-
-                if (res.ok) {
-                    // 2. Update Frontend State (Remove from array)
-                    const updatedQuals = person.qualifications.filter(q => q.station_id !== stationId);
-                    updatePersonState(personIndex, updatedQuals);
-                }
+                if (res.ok) refreshData();
             } catch (err) {
                 console.error("Error revoking qual:", err);
             }
         } else {
-            // --- GRANT (POST) ---
+            // GRANT (POST) with Today's Date as default
             try {
-                // 1. Call Backend
                 const res = await fetch('/api/qualifications', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         person_id: personId,
                         station_id: stationId,
-                        earned_date: new Date().toISOString().split('T')[0] // Optional: Today's date
+                        earned_date: new Date().toISOString().split('T')[0] // Defaults to Today
                     })
                 });
-
-                if (res.ok) {
-                    // We need to get the new ID back from the server (if your POST returns it)
-                    // Or we re-fetch. Ideally, your backend POST returns { id: 123, ... }
-                    // For now, we'll just re-fetch everything to be safe and accurate.
-                    refreshData();
-                }
+                if (res.ok) refreshData();
             } catch (err) {
                 console.error("Error granting qual:", err);
             }
         }
-    };
-
-    const updatePersonState = (index, newQuals) => {
-        setPeople(prev => {
-            const newPeople = [...prev];
-            newPeople[index] = { ...newPeople[index], qualifications: newQuals };
-            return newPeople;
-        });
     };
 
     const refreshData = () => {
@@ -93,7 +87,7 @@ export default function Qualifications() {
             <Box mb={3}>
                 <Typography variant="h4" fontWeight="bold">Qualification Matrix</Typography>
                 <Typography variant="body2" color="text.secondary">
-                    Manage who is qualified to stand which watch.
+                    Grant qualifications and track earned dates.
                 </Typography>
             </Box>
 
@@ -105,14 +99,8 @@ export default function Qualifications() {
                                 Name / Group
                             </TableCell>
                             {stations.map(station => (
-                                <TableCell
-                                    key={station.id}
-                                    align="center"
-                                    sx={{ bgcolor: 'primary.light', color: 'white', fontWeight: 'bold', minWidth: 80 }}
-                                >
-                                    <Box display="flex" flexDirection="column" alignItems="center">
-                                        <span>{station.abbr}</span>
-                                    </Box>
+                                <TableCell key={station.id} align="center" sx={{ bgcolor: 'primary.light', color: 'white', fontWeight: 'bold', minWidth: 150 }}>
+                                    {station.abbr}
                                 </TableCell>
                             ))}
                         </TableRow>
@@ -126,17 +114,87 @@ export default function Qualifications() {
                                 </TableCell>
 
                                 {stations.map(station => {
-                                    // Check if this station ID exists in the person's qualifications list
-                                    const isQualified = person.qualifications.some(q => q.station_id === station.id);
+                                    const qual = person.qualifications.find(q => q.station_id === station.id);
 
                                     return (
-                                        <TableCell key={station.id} align="center" padding="none">
-                                            <Checkbox
-                                                checked={isQualified}
-                                                onChange={() => handleToggle(person.id, station.id)}
-                                                disabled={!person.is_active}
-                                                sx={{ '&.Mui-checked': { color: 'primary.main' } }}
-                                            />
+                                        <TableCell key={station.id} align="center" sx={{ borderRight: '1px solid #f0f0f0', minWidth: 180 }}>
+                                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '40px' }}>
+
+                                                {/* 1. If NOT qualified, show the simple Checkbox to grant it */}
+                                                {!qual ? (
+                                                    <Checkbox
+                                                        checked={false}
+                                                        onChange={() => handleToggle(person.id, station.id)}
+                                                        disabled={!person.is_active}
+                                                        size="small"
+                                                        sx={{ color: '#ccc' }}
+                                                    />
+                                                ) : (
+                                                    /* 2. If QUALIFIED, hide checkbox and show the Status Pill */
+                                                    <Box sx={{
+                                                        position: 'relative',
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        '&:hover .action-buttons': { opacity: 1, visibility: 'visible' }
+                                                    }}>
+                                                        <Chip
+                                                            icon={<CheckCircleIcon style={{ color: '#2e7d32', fontSize: '1rem' }} />}
+                                                            label={`Qualified: ${formatToUS(qual.earned_date)}`}
+                                                            size="small"
+                                                            variant="outlined"
+                                                            sx={{
+                                                                fontSize: '0.7rem',
+                                                                height: '26px',
+                                                                bgcolor: '#e8f5e9',
+                                                                color: '#2e7d32',
+                                                                fontWeight: 'bold',
+                                                                border: '1px solid #a5d6a7'
+                                                            }}
+                                                        />
+
+                                                        {/* 3. Action Buttons Overlay (Visible on Hover) */}
+                                                        <Box className="action-buttons" sx={{
+                                                            position: 'absolute',
+                                                            right: -50,
+                                                            display: 'flex',
+                                                            gap: 0.5,
+                                                            opacity: 0,
+                                                            visibility: 'hidden',
+                                                            transition: 'all 0.2s ease-in-out',
+                                                            bgcolor: 'white',
+                                                            borderRadius: '4px',
+                                                            boxShadow: 1,
+                                                            p: 0.2
+                                                        }}>
+                                                            {/* Edit Button (Trigger for the hidden date input) */}
+                                                            <IconButton size="small" sx={{ p: 0.2, color: 'primary.main', position: 'relative' }}>
+                                                                <EditIcon sx={{ fontSize: 16 }} />
+                                                                <input
+                                                                    type="date"
+                                                                    value={qual.earned_date || ""}
+                                                                    onChange={(e) => handleDateChange(qual.qual_id, e.target.value)}
+                                                                    style={{
+                                                                        position: 'absolute',
+                                                                        inset: 0,
+                                                                        opacity: 0,
+                                                                        cursor: 'pointer',
+                                                                    }}
+                                                                />
+                                                            </IconButton>
+
+                                                            {/* Revoke Button (Red X) */}
+                                                            <IconButton
+                                                                size="small"
+                                                                color="error"
+                                                                sx={{ p: 0.2 }}
+                                                                onClick={() => handleToggle(person.id, station.id)} // Revoke logic
+                                                            >
+                                                                <CancelIcon sx={{ fontSize: 16 }} />
+                                                            </IconButton>
+                                                        </Box>
+                                                    </Box>
+                                                )}
+                                            </Box>
                                         </TableCell>
                                     );
                                 })}
