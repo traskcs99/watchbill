@@ -8,8 +8,25 @@ from app.models import (
     Holiday,
     Assignment,
 )
+from .holidays import get_holidays_with_breaks
+from datetime import timedelta, date
 
-from datetime import timedelta
+
+def populate_holiday_table(start_date_str, end_date_str):
+    # This calls the API in holidays.py
+    holidays = get_holidays_with_breaks(start_date_str, end_date_str)
+
+    for h in holidays:
+        # Convert the string date from the API to a Python date object
+        date_obj = date.fromisoformat(h["date"])
+
+        # Check if we already have this holiday to avoid UniqueConstraint errors
+        existing = Holiday.query.filter_by(date=date_obj).first()
+        if not existing:
+            new_h = Holiday(date=date_obj, name=h["name"])
+            db.session.add(new_h)
+
+    db.session.commit()
 
 
 def add_person_to_schedule(schedule_id, person_id, overrides=None):

@@ -1,6 +1,7 @@
 import pytest
 from app.models import Person, MasterStation, Qualification, Group
 from app.database import db
+from datetime import date
 
 
 @pytest.fixture
@@ -72,3 +73,39 @@ def test_revoke_qualification(client, session, setup_data):
     assert response.status_code == 200
     revoked_qual = session.get(Qualification, qual.id)
     assert revoked_qual is None
+
+
+def test_update_qualification_date(client, session):
+    # 1. Setup: Create the PREREQUISITES first
+    # We need a Group because Person requires a group_id
+    group = Group(name="Test Group", priority=1)
+    session.add(group)
+    session.flush()  # This generates the group.id without committing yet
+
+    # Create the Person and the Station
+    person = Person(name="John Doe", group_id=group.id)
+    station = MasterStation(name="Console 1", abbr="C1")
+    session.add_all([person, station])
+    session.flush()  # This generates person.id and station.id
+
+    # 2. Create the Qualification using the real IDs
+    qual = Qualification(person_id=person.id, station_id=station.id, earned_date=None)
+    session.add(qual)
+    session.commit()  # Now this will succeed because the Foreign Keys exist!
+
+    # 3. Test valid update via the PATCH route
+    new_date_str = "2025-12-25"
+    response = client.patch(
+        f"/api/qualifications/{qual.id}", json={"earned_date": new_date_str}
+    )
+
+    assert response.status_code == 200
+    # Refresh the object from the DB to check the value
+    session.refresh(qual)
+    assert qual.earned_date == date(2025, 12, 25)
+
+    # 4. Test invalid date format
+    response = client.patch(
+        f"/api/qualifications/{qual.id}", json={"earned_date": "invalid-date"}
+    )
+    assert response.status_code == 400

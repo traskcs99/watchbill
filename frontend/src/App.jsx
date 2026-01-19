@@ -6,6 +6,8 @@ import {
 import Dashboard from './pages/Dashboard';
 import Personnel from './pages/Personnel'; // <--- ADD THIS IMPORT!
 import Groups from './pages/Groups';
+import Stations from './pages/Stations';
+import Qualifications from './pages/Qualifications';
 
 
 // Custom Command Theme
@@ -76,8 +78,8 @@ function App() {
                 <Route path="/" element={<Dashboard />} />
                 <Route path="/groups" element={<Groups />} />
                 <Route path="/personnel" element={<Personnel />} />
-                <Route path="/stations" element={<Typography variant="h4">Stations Page</Typography>} />
-                <Route path="/quals" element={<Typography variant="h4">Qualifications Page</Typography>} />
+                <Route path="/stations" element={<Stations />} />
+                <Route path="/quals" element={<Qualifications />} />
               </Routes>
             </Container>
           </Box>

@@ -1,24 +1,20 @@
 from flask import Flask
 from flask_cors import CORS
-from .database import db
+from .models import db, migrate
 import os
-
-BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-INSTANCE_FOLDER_PATH = os.path.join(BASE_DIR, "instance")
+from config import Config  # Now it should find it
 
 
-def create_app():
+def create_app(config_class=Config):
     app = Flask(__name__)
+    app.config.from_object(config_class)
+
+    # Initialize Extensions
+    db.init_app(app)
+    migrate.init_app(app, db)
+    CORS(app)
 
     # Configuration - update with your actual DB URI
-    if not os.path.exists(INSTANCE_FOLDER_PATH):
-        os.makedirs(INSTANCE_FOLDER_PATH)
-    db_path = os.path.join(INSTANCE_FOLDER_PATH, "watchbill.db")
-    app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{db_path}"
-    app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-
-    CORS(app)
-    db.init_app(app)
 
     # Register Blueprints (we will create these next)
     from .routes.personnel import person_bp
@@ -67,8 +63,5 @@ def create_app():
     from .routes.membership_station_route import membership_station_bp
 
     app.register_blueprint(membership_station_bp, url_prefix="/api")
-
-    with app.app_context():
-        db.create_all()  # Creates tables based on models.py
 
     return app

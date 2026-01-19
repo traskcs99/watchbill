@@ -43,3 +43,36 @@ def revoke_qualification(qual_id):
     db.session.delete(qual)
     db.session.commit()
     return jsonify({"message": "Qualification removed"}), 200
+
+
+@qualifications_bp.route("/qualifications/<int:qual_id>", methods=["PATCH"])
+def update_qualification(qual_id):
+    qual = db.session.get(Qualification, qual_id)
+    if not qual:
+        return jsonify({"error": "Qualification not found"}), 404
+
+    data = request.get_json()
+
+    if "earned_date" in data:
+        date_str = data.get("earned_date")
+        try:
+            # Handle null/empty string if user clears the date
+            qual.earned_date = date.fromisoformat(date_str) if date_str else None
+        except ValueError:
+            return jsonify({"error": "Invalid date format. Use YYYY-MM-DD"}), 400
+
+    db.session.commit()
+    return (
+        jsonify(
+            {
+                "message": "Qualification updated",
+                "qualification": {
+                    "id": qual.id,
+                    "earned_date": (
+                        qual.earned_date.isoformat() if qual.earned_date else None
+                    ),
+                },
+            }
+        ),
+        200,
+    )

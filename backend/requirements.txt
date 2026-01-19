@@ -3,6 +3,7 @@ Flask
 Flask-SQLAlchemy
 SQLAlchemy
 flask-cors
+flask-migrate
 
 # --- Utilities ---
 requests

@@ -4,6 +4,7 @@ from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import event
 from sqlalchemy.engine import Engine
 from sqlite3 import Connection as SQLite3Connection
+from flask_migrate import Migrate
 
 
 class Base(DeclarativeBase):
@@ -32,3 +33,5 @@ def _set_sqlite_pragma(dbapi_connection, connection_record):
 
 
 db = SQLAlchemy(model_class=Base)
+# 2. Initialize Migrate here
+migrate = Migrate()

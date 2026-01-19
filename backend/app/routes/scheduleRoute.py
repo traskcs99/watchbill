@@ -7,9 +7,9 @@ from ..models import (
     MembershipStationWeight,
     ScheduleDay,
 )
-from ..utils.schedule_utils import generate_schedule_days
+from ..utils.schedule_utils import generate_schedule_days, populate_holiday_table
 from ..utils.schedule_summary_util import get_schedule_summary_data
-from datetime import datetime
+from datetime import datetime, date
 
 schedule_bp = Blueprint("schedules", __name__)
 
@@ -28,6 +28,14 @@ def create_schedule():
 
         # Flush sends 'new_schedule' to DB to get its ID without finishing the transaction
         db.session.flush()
+
+        # Populate the holiday table
+        start_date = date.fromisoformat(data["start_date"])
+        end_date = date.fromisoformat(data["end_date"])
+        try:
+            populate_holiday_table(data["start_date"], data["end_date"])
+        except Exception as e:
+            print(f"Holiday fetch failed, continuing with existing data: {e}")
 
         # Now we can generate the days!
         generate_schedule_days(new_schedule)

@@ -3,7 +3,7 @@ from datetime import date
 from typing import Optional, List
 from sqlalchemy import String, Integer, Boolean, Date, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from .database import db
+from .database import db, migrate
 
 # --- 1. MASTER DATA ---
 
@@ -57,8 +57,11 @@ class Person(db.Model):
         ForeignKey("groups.id", ondelete="SET NULL")
     )
     group: Mapped[Optional["Group"]] = relationship()
-    qualifications: Mapped[List["Qualification"]] = relationship(
-        back_populates="person", cascade="all, delete-orphan"
+    qualifications = db.relationship(
+        "Qualification",
+        back_populates="person",
+        cascade="all, delete-orphan",
+        lazy="selectin",  # <--- ADDS "N+1" PROTECTION (Batch Loading)
     )
 
     def to_dict(self):
@@ -68,6 +71,14 @@ class Person(db.Model):
             "is_active": self.is_active,
             "group_id": self.group_id,
             "group_name": self.group.name if self.group else None,
+            "qualifications": [
+                {
+                    "qual_id": q.id,
+                    "station_id": q.station_id,
+                    "earned_date": q.earned_date.isoformat() if q.earned_date else None,
+                }
+                for q in self.qualifications
+            ],
         }
 
 

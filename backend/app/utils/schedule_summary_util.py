@@ -35,7 +35,6 @@ def get_schedule_summary_data(schedule_id):
 
     for sch_station in stations_in_schedule:
         station = sch_station.master_station
-
         # 3. Calculate Supply for this specific Station
         total_personnel_weight = (
             db.session.query(func.sum(MembershipStationWeight.weight))

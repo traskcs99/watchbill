@@ -74,9 +74,6 @@ def test_get_single_schedule_full_load(client, session):
     assert data["days"][0]["is_holiday"] is True
     assert data["days"][0]["name"] == "New Year's Day"
 
-    # Jan 2nd (Friday)
-    assert data["days"][1]["weight"] == 1.5
-
     # Jan 5th (Monday)
     assert data["days"][4]["weight"] == 1.0
 

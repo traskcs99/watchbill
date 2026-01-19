@@ -3,9 +3,10 @@ import {
     Box, Typography, Button, TextField,
     Dialog, DialogTitle, DialogContent, DialogActions,
     FormControl, InputLabel, Select, MenuItem, Chip,
-    FormControlLabel, Switch, IconButton, Tooltip
+    FormControlLabel, Switch, IconButton, Tooltip,
+    Paper, Table, TableBody, TableCell, TableContainer,
+    TableHead, TableRow
 } from '@mui/material';
-import { DataGrid } from '@mui/x-data-grid';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
@@ -17,7 +18,7 @@ export default function Personnel() {
     const [members, setMembers] = useState([]);
     const [groups, setGroups] = useState([]);
     const [open, setOpen] = useState(false);
-    const [editingId, setEditingId] = useState(null); // Track if we are editing
+    const [editingId, setEditingId] = useState(null);
 
     const [formData, setFormData] = useState({
         name: '',
@@ -31,38 +32,27 @@ export default function Personnel() {
     }, []);
 
     const fetchData = () => {
-        // Fetch Personnel
-        fetch('/api/personnel')
-            .then(res => res.json())
-            .then(data => setMembers(data))
-            .catch(err => console.error(err));
-
-        // Fetch Groups
-        fetch('/api/groups')
-            .then(res => res.json())
-            .then(data => setGroups(data))
-            .catch(err => console.error(err));
+        fetch('/api/personnel').then(res => res.json()).then(setMembers);
+        fetch('/api/groups').then(res => res.json()).then(setGroups);
     };
 
-    // 2. Open Dialog (Create vs Edit)
+    // 2. Open Dialog
     const handleOpen = (person = null) => {
         if (person) {
-            // EDIT MODE
             setEditingId(person.id);
             setFormData({
                 name: person.name,
-                group_id: person.group_id || '', // Handle null group
+                group_id: person.group_id || '',
                 is_active: person.is_active
             });
         } else {
-            // CREATE MODE
             setEditingId(null);
             setFormData({ name: '', group_id: '', is_active: true });
         }
         setOpen(true);
     };
 
-    // 3. Submit (Create or Update)
+    // 3. Submit
     const handleSubmit = () => {
         const url = editingId ? `/api/personnel/${editingId}` : '/api/personnel';
         const method = editingId ? 'PUT' : 'POST';
@@ -77,123 +67,106 @@ export default function Personnel() {
                 return res.json();
             })
             .then(() => {
-                fetchData(); // Refresh list to get updated names/groups
+                fetchData();
                 setOpen(false);
             })
             .catch(err => console.error(err));
     };
 
     // 4. Delete
-    const handleDelete = (id) => {
-        if (!window.confirm("Are you sure you want to delete this person?")) return;
-
+    const handleDelete = (id, name) => {
+        if (!window.confirm(`Delete ${name}?`)) return;
         fetch(`/api/personnel/${id}`, { method: 'DELETE' })
-            .then(res => {
-                if (res.ok) {
-                    setMembers(members.filter((m) => m.id !== id));
-                }
-            });
+            .then(res => { if (res.ok) fetchData(); });
     };
 
-    const columns = [
-        {
-            field: 'name',
-            headerName: 'Name',
-            width: 220,
-            renderCell: (params) => (
-                <Box display="flex" alignItems="center" gap={1}>
-                    <PersonIcon color={params.row.is_active ? "primary" : "disabled"} fontSize="small" />
-                    <Typography color={params.row.is_active ? "textPrimary" : "textSecondary"}>
-                        {params.value}
+    return (
+        <Box sx={{ maxWidth: 1000, mx: 'auto', p: 3 }}>
+            {/* HEADER - Matches Stations Style */}
+            <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
+                <Box>
+                    <Typography variant="h4" fontWeight="bold">Personnel</Typography>
+                    <Typography variant="body2" color="text.secondary">
+                        Manage your roster, active status, and rank/group assignments.
                     </Typography>
                 </Box>
-            )
-        },
-        {
-            field: 'group_name',
-            headerName: 'Group',
-            width: 180,
-            valueGetter: (value, row) => row.group_name || 'Unassigned',
-            renderCell: (params) => (
-                params.value !== 'Unassigned' ? (
-                    <Chip label={params.value} size="small" variant="outlined" />
-                ) : (
-                    <Typography variant="caption" color="text.secondary" fontStyle="italic">None</Typography>
-                )
-            )
-        },
-        {
-            field: 'is_active',
-            headerName: 'Status',
-            width: 100,
-            renderCell: (params) => (
-                params.value ?
-                    <Box color="success.main" display="flex" alignItems="center" gap={0.5}><CheckCircleIcon fontSize="small" /> Active</Box> :
-                    <Box color="error.main" display="flex" alignItems="center" gap={0.5}><CancelIcon fontSize="small" /> Inactive</Box>
-            )
-        },
-        {
-            field: 'actions',
-            headerName: 'Actions',
-            width: 150,
-            sortable: false,
-            renderCell: (params) => (
-                <Box>
-                    <Tooltip title="Edit">
-                        <IconButton size="small" onClick={() => handleOpen(params.row)}>
-                            <EditIcon fontSize="small" />
-                        </IconButton>
-                    </Tooltip>
-                    <Tooltip title="Delete">
-                        <IconButton size="small" color="error" onClick={() => handleDelete(params.row.id)}>
-                            <DeleteIcon fontSize="small" />
-                        </IconButton>
-                    </Tooltip>
-                </Box>
-            )
-        }
-    ];
-
-    return (
-        <Box sx={{ height: 600, width: '100%' }}>
-            <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-                <Typography variant="h4" fontWeight="bold">Personnel Roster</Typography>
-                <Button
-                    variant="contained"
-                    startIcon={<AddIcon />}
-                    onClick={() => handleOpen(null)}
-                >
+                <Button variant="contained" startIcon={<AddIcon />} onClick={() => handleOpen(null)}>
                     Add Sailor
                 </Button>
             </Box>
 
-            <DataGrid
-                rows={members}
-                columns={columns}
-                initialState={{
-                    pagination: { paginationModel: { pageSize: 10 } },
-                }}
-                pageSizeOptions={[10, 25, 50]}
-                disableRowSelectionOnClick
-                sx={{ bgcolor: 'white', boxShadow: 1 }}
-            />
+            {/* TABLE - Matches Stations Style */}
+            <TableContainer component={Paper} elevation={2}>
+                <Table>
+                    <TableHead sx={{ bgcolor: 'primary.light' }}>
+                        <TableRow>
+                            <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Name</TableCell>
+                            <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Group / Rank</TableCell>
+                            <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Status</TableCell>
+                            <TableCell align="right" sx={{ color: 'white', fontWeight: 'bold' }}>Actions</TableCell>
+                        </TableRow>
+                    </TableHead>
+                    <TableBody>
+                        {members.length === 0 ? (
+                            <TableRow>
+                                <TableCell colSpan={4} align="center" sx={{ py: 4, color: 'text.secondary' }}>
+                                    No personnel found.
+                                </TableCell>
+                            </TableRow>
+                        ) : (
+                            members.map((person) => (
+                                <TableRow key={person.id} hover>
+                                    <TableCell>
+                                        <Box display="flex" alignItems="center" gap={1.5}>
+                                            <PersonIcon color={person.is_active ? "primary" : "disabled"} />
+                                            <Typography variant="subtitle1" color={person.is_active ? "textPrimary" : "textSecondary"}>
+                                                {person.name}
+                                            </Typography>
+                                        </Box>
+                                    </TableCell>
+                                    <TableCell>
+                                        {person.group_name ? (
+                                            <Chip label={person.group_name} size="small" variant="outlined" />
+                                        ) : (
+                                            <Typography variant="caption" color="text.secondary" fontStyle="italic">Unassigned</Typography>
+                                        )}
+                                    </TableCell>
+                                    <TableCell>
+                                        {person.is_active ? (
+                                            <Chip icon={<CheckCircleIcon />} label="Active" color="success" size="small" variant="outlined" />
+                                        ) : (
+                                            <Chip icon={<CancelIcon />} label="Inactive" color="default" size="small" variant="outlined" />
+                                        )}
+                                    </TableCell>
+                                    <TableCell align="right">
+                                        <Tooltip title="Edit">
+                                            <IconButton size="small" onClick={() => handleOpen(person)}>
+                                                <EditIcon fontSize="small" />
+                                            </IconButton>
+                                        </Tooltip>
+                                        <Tooltip title="Delete">
+                                            <IconButton size="small" color="error" onClick={() => handleDelete(person.id, person.name)}>
+                                                <DeleteIcon fontSize="small" />
+                                            </IconButton>
+                                        </Tooltip>
+                                    </TableCell>
+                                </TableRow>
+                            ))
+                        )}
+                    </TableBody>
+                </Table>
+            </TableContainer>
 
-            {/* CREATE / EDIT DIALOG */}
+            {/* DIALOG */}
             <Dialog open={open} onClose={() => setOpen(false)} fullWidth maxWidth="xs">
                 <DialogTitle>{editingId ? "Edit Sailor" : "Add New Sailor"}</DialogTitle>
                 <DialogContent>
                     <Box display="flex" flexDirection="column" gap={3} mt={1}>
-
-                        {/* NAME INPUT */}
                         <TextField
-                            autoFocus
-                            label="Full Name"
+                            autoFocus label="Full Name" fullWidth
                             value={formData.name}
                             onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                            fullWidth
                         />
-
-                        {/* GROUP SELECTOR */}
                         <FormControl fullWidth>
                             <InputLabel>Group / Rank</InputLabel>
                             <Select
@@ -203,31 +176,21 @@ export default function Personnel() {
                             >
                                 <MenuItem value=""><em>None</em></MenuItem>
                                 {groups.map((g) => (
-                                    <MenuItem key={g.id} value={g.id}>
-                                        {g.name}
-                                    </MenuItem>
+                                    <MenuItem key={g.id} value={g.id}>{g.name}</MenuItem>
                                 ))}
                             </Select>
                         </FormControl>
-
-                        {/* ACTIVE SWITCH */}
                         <FormControlLabel
                             control={
-                                <Switch
-                                    checked={formData.is_active}
-                                    onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
-                                />
+                                <Switch checked={formData.is_active} onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })} />
                             }
-                            label={formData.is_active ? "Status: Active" : "Status: Inactive (On Leave/Transfer)"}
+                            label={formData.is_active ? "Status: Active" : "Status: Inactive"}
                         />
-
                     </Box>
                 </DialogContent>
                 <DialogActions sx={{ p: 2 }}>
                     <Button onClick={() => setOpen(false)}>Cancel</Button>
-                    <Button variant="contained" onClick={handleSubmit} disabled={!formData.name}>
-                        Save
-                    </Button>
+                    <Button variant="contained" onClick={handleSubmit} disabled={!formData.name}>Save</Button>
                 </DialogActions>
             </Dialog>
         </Box>
