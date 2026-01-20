@@ -405,13 +405,14 @@ class ScheduleExclusion(db.Model):
     day: Mapped["ScheduleDay"] = relationship()
 
     def to_dict(self):
+        person = self.membership.person if self.membership else None
         return {
             "id": self.id,
-            "membership_id": self.membership_id,
-            "day_id": self.day_id,
+            "day_id": self.day_id,  # <--- FIX: Changed from schedule_day_id
+            "person_id": person.id if person else None,
+            "person_name": person.name if person else "Unknown",
+            "date": self.day.date.isoformat() if self.day and self.day.date else None,
             "reason": self.reason,
-            # This safely reaches through to the day table for the date string
-            "date": self.day.date.isoformat() if self.day else None,
         }
 
 

@@ -90,7 +90,7 @@ def test_create_exclusion_invalid_ids(client, exclusion_env):
     payload = {"membership_id": 99999, "day_id": exclusion_env["day1"].id}  # Bad ID
     res = client.post("/api/exclusions", json=payload)
     assert res.status_code == 404
-    assert "Membership or Day not found" in res.json["error"]
+    assert "Membership not found" in res.json["error"]
 
 
 # --- Batch Create Tests (POST /batch) ---
@@ -208,3 +208,45 @@ def test_cascade_delete_on_membership_removal(session, exclusion_env):
     # The exclusion should be gone
     count = session.query(ScheduleExclusion).count()
     assert count == 0
+
+
+def test_get_exclusions_n_plus_one_check(
+    client, session
+):  # <--- Ensure 'session' is used, not db_session
+    # 1. Setup Dependencies
+    schedule = Schedule(
+        name="N+1 Test", start_date=date(2026, 1, 1), end_date=date(2026, 1, 31)
+    )
+    person = Person(name="Excluded Guy")
+    session.add_all([schedule, person])
+    session.commit()
+
+    group = Group(name="Excluded Group")
+    session.add(group)
+    session.commit()
+
+    # Create the Day and Membership needed for the Exclusion
+    day = ScheduleDay(schedule_id=schedule.id, date=date(2026, 1, 15))
+    membership = ScheduleMembership(
+        schedule_id=schedule.id, person_id=person.id, group_id=group.id
+    )
+    session.add_all([day, membership])
+    session.commit()
+
+    # 2. Create the Exclusion (linking Membership -> Day)
+    exclusion = ScheduleExclusion(
+        membership_id=membership.id,
+        day_id=day.id,  # <--- This is how we link it!
+        reason="Medical",
+    )
+    session.add(exclusion)
+    session.commit()
+
+    # 3. Test the Endpoint
+    response = client.get(f"/api/exclusions/schedule/{schedule.id}")
+
+    assert response.status_code == 200
+    data = response.json
+    assert len(data) == 1
+    assert data[0]["person_name"] == "Excluded Guy"
+    assert data[0]["date"] == "2026-01-15"

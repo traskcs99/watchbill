@@ -15,7 +15,6 @@ import ConfigurationTab from '../components/ConfigurationTab';
 import WeightDistributionDialog from '../components/WeightDistributionDialog';
 // NOTE: Make sure to import your new LeaveManagerDialog here once created
 import LeaveManagerDialog from '../components/LeaveManagerDialog';
-import ScheduleDayCell from '../components/ScheduleDayCell'; // Ensure this is imported if used directly (or via Calendar)
 
 export default function ScheduleWorkspace() {
     const { scheduleId } = useParams();
@@ -45,31 +44,21 @@ export default function ScheduleWorkspace() {
     const [leaveDialogOpen, setLeaveDialogOpen] = useState(false);
     const [activeLeaveMember, setActiveLeaveMember] = useState(null);
 
-    const [assignments, setAssignments] = useState([]); // Add State for Assignments
-    const [allLeaves, setAllLeaves] = useState([]); // Add State for Leaves
-    const [allExclusions, setAllExclusions] = useState([]); // Add State for Exclusions
-
     // -- DATA FETCHING --
     const fetchData = useCallback(async () => {
         try {
-            const [schRes, daysRes, summaryRes, masterRes, peopleRes, assignmentsRes, leavesRes, exclusionsRes] = await Promise.all([
+            const [schRes, daysRes, summaryRes, masterRes, peopleRes] = await Promise.all([
                 fetch(`/api/schedules/${scheduleId}`).then(res => res.json()),
                 fetch(`/api/schedules/${scheduleId}/days`).then(res => res.json()),
                 fetch(`/api/schedules/${scheduleId}/summary`).then(res => res.json()),
                 fetch('/api/master-stations').then(res => res.json()),
-                fetch('/api/personnel').then(res => res.json()),
-                fetch(`/api/schedules/${scheduleId}/assignments`).then(res => res.ok ? res.json() : []),
-                fetch(`/api/leaves?schedule_id=${scheduleId}`).then(res => res.ok ? res.json() : []),
-                fetch(`/api/exclusions/schedule/${scheduleId}`).then(res => res.ok ? res.json(
+                fetch('/api/personnel').then(res => res.json())
             ]);
             setSchedule(schRes);
             setDays(daysRes);
             setSummary(summaryRes);
             setMasterStations(masterRes);
             setAllPersonnel(peopleRes);
-            setAssignments(assignments)
-            setAllLeaves(leavesRes);
-            setAllExclusions(exclusionsRes);
             setLoading(false);
         } catch (err) {
             console.error("Error loading workspace:", err);
@@ -186,10 +175,6 @@ export default function ScheduleWorkspace() {
                     days={days}
                     selectedDay={selectedDay}
                     onSelectDay={setSelectedDay}
-                    assignments={assignments} // Pass the data down
-                    leaves={allLeaves}        // Pass the data down
-                    exclusions={allExclusions} // Pass the data down
-
                 />
 
                 {/* 2. SIDEBAR TABS */}
