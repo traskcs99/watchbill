@@ -9,6 +9,8 @@ venv/
 env/
 .env/
 instance/
+.vite
+
 # Distribution and packaging
 build/
 dist/

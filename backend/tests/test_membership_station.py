@@ -145,3 +145,131 @@ def test_cascade_delete_membership_removes_weights(client, session, member_stati
         session.query(MembershipStationWeight).filter_by(membership_id=mem_id).all()
     )
     assert len(weights) == 0
+
+
+import pytest
+from app.models import ScheduleMembership, MembershipStationWeight, Qualification
+
+
+def test_single_qualification_defaults_to_100_percent(
+    client, session, station_test_env
+):
+    """
+    Test that a person with only one qualification is automatically
+    assigned 1.0 weight when added to a schedule.
+    """
+    sch_id = station_test_env["schedule"].id
+    person = station_test_env["person"]
+    stn_id = station_test_env["station"].id  # e.g., SDO
+
+    # Setup: Ensure person only has 1 qual
+    session.query(Qualification).filter_by(person_id=person.id).delete()
+    qual = Qualification(person_id=person.id, station_id=stn_id, is_active=True)
+    session.add(qual)
+    session.commit()
+
+    # Action: Add person to schedule
+    res = client.post(
+        "/api/schedule-memberships",
+        json={"schedule_id": sch_id, "person_id": person.id},
+    )
+
+    assert res.status_code == 201
+    membership_id = res.get_json()["id"]
+
+    # Verify: Weight should be 1.0 automatically
+    weights = MembershipStationWeight.query.filter_by(membership_id=membership_id).all()
+    assert len(weights) == 1
+    assert weights[0].weight == 1.0
+
+
+def test_single_qualification_defaults_to_100_percent(
+    client, session, member_station_env
+):
+    """
+    Test that adding a person with 1 qual via API triggers the 1.0 weight creation.
+    """
+    # 1. Setup a fresh person with 1 qualification
+    new_person = Person(name="Test User", group_id=1)
+    session.add(new_person)
+    session.flush()
+
+    q_station = member_station_env["qualified_station"]
+    qual = Qualification(
+        person_id=new_person.id, station_id=q_station.id, is_active=True
+    )
+    session.add(qual)
+    session.commit()
+
+    # 2. Action: Call the POST route
+    res = client.post(
+        "/api/schedule-memberships",
+        json={
+            "schedule_id": member_station_env["membership"].schedule_id,
+            "person_id": new_person.id,
+        },
+    )
+
+    assert res.status_code == 201
+    membership_id = res.get_json()["id"]
+
+    # 3. Verify: Check the DB for the automatic weight
+    session.expire_all()
+    weights = (
+        session.query(MembershipStationWeight)
+        .filter_by(membership_id=membership_id)
+        .all()
+    )
+
+    assert len(weights) == 1
+    assert weights[0].weight == 1.0
+    assert weights[0].station_id == q_station.id
+
+
+def test_reject_invalid_weight_sum(client, session, member_station_env):
+    """
+    Test that the backend rejects weights that do not sum to 1.0 (100%).
+    """
+    membership_id = member_station_env["membership"].id
+    q_id = member_station_env["qualified_station"].id
+    u_id = member_station_env["unqualified_station"].id
+
+    # Action: Try to set weights summing to 1.2 (120%)
+    payload = {"weights": {str(q_id): 0.6, str(u_id): 0.6}}
+    res = client.post(
+        f"/api/schedule-memberships/{membership_id}/weights/distribute", json=payload
+    )
+
+    # Verify: Should fail with 400
+    assert res.status_code == 400
+    assert "Total weight must equal 100%" in res.get_json()["error"]
+
+
+def test_successful_weight_distribution(client, session, member_station_env):
+    """
+    Test splitting a person's workload 70/30 between two stations.
+    """
+    membership_id = member_station_env["membership"].id
+    q_id = member_station_env["qualified_station"].id
+    u_id = member_station_env["unqualified_station"].id
+
+    # Action: Distribute Weights 70/30
+    payload = {"weights": {str(q_id): 0.7, str(u_id): 0.3}}
+    res = client.post(
+        f"/api/schedule-memberships/{membership_id}/weights/distribute", json=payload
+    )
+
+    assert res.status_code == 200
+
+    # Verify in Database
+    session.expire_all()
+    weights = (
+        session.query(MembershipStationWeight)
+        .filter_by(membership_id=membership_id)
+        .all()
+    )
+    assert len(weights) == 2
+
+    weight_map = {w.station_id: w.weight for w in weights}
+    assert weight_map[q_id] == 0.7
+    assert weight_map[u_id] == 0.3

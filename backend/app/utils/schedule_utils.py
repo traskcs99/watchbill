@@ -29,39 +29,52 @@ def populate_holiday_table(start_date_str, end_date_str):
     db.session.commit()
 
 
-def add_person_to_schedule(schedule_id, person_id, overrides=None):
-    """
-    Creates ScheduleMembership and initializes local MembershipStationWeights.
-    Accepts an optional dictionary of overrides for seniority and assignment limits.
-    """
+def add_person_to_schedule(schedule_id, person_id, group_id=None, **overrides):
+    # 1. PRE-FLIGHT CHECK
+    exists = ScheduleMembership.query.filter_by(
+        schedule_id=schedule_id, person_id=person_id
+    ).first()
+
+    if exists:
+        raise ValueError("This person is already a member of the schedule.")
+
     person = db.session.get(Person, person_id)
     if not person:
-        return None
+        raise ValueError("Person not found.")
 
-    # 1. Create the Membership record
-    membership = ScheduleMembership(
-        schedule_id=schedule_id, person_id=person_id, group_id=person.group_id
+    # 2. RESOLVE GROUP ID
+    target_group_id = group_id if group_id is not None else person.group_id
+    if target_group_id is None:
+        raise ValueError("Cannot add member: No Group ID provided.")
+
+    # 3. CREATE MEMBERSHIP
+    new_mem = ScheduleMembership(
+        schedule_id=schedule_id, person_id=person_id, group_id=target_group_id
     )
 
-    # 2. Apply Overrides if provided
-    if overrides:
-        membership.override_seniorityFactor = overrides.get("override_seniorityFactor")
-        membership.override_min_assignments = overrides.get("override_min_assignments")
-        membership.override_max_assignments = overrides.get("override_max_assignments")
+    # --- THE FIX: Apply Overrides ---
+    # This loop allows the test to pass "override_max_assignments"
+    valid_overrides = [
+        "override_seniorityFactor",
+        "override_min_assignments",
+        "override_max_assignments",
+    ]
+    for key, value in overrides.items():
+        if key in valid_overrides and value is not None:
+            setattr(new_mem, key, value)
 
-    db.session.add(membership)
-    db.session.flush()  # Generate membership.id
+    db.session.add(new_mem)
+    db.session.flush()
 
-    # 3. Create local weights from global qualifications
+    # 4. AUTO-WEIGHT LOGIC
     active_quals = [q for q in person.qualifications if q.is_active]
-    for qual in active_quals:
-        local_weight = MembershipStationWeight(
-            membership_id=membership.id, station_id=qual.station_id, weight=1.0
+    if len(active_quals) == 1:
+        auto_weight = MembershipStationWeight(
+            membership_id=new_mem.id, station_id=active_quals[0].station_id, weight=1.0
         )
-        db.session.add(local_weight)
+        db.session.add(auto_weight)
 
-    db.session.commit()
-    return membership
+    return new_mem
 
 
 def generate_schedule_days(schedule):

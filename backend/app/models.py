@@ -260,17 +260,37 @@ class ScheduleMembership(db.Model):
     def to_dict(self):
         return {
             "id": self.id,
-            "schedule_id": self.schedule_id,
             "person_id": self.person_id,
-            "group_id": self.group_id,
-            "person_name": self.person.name if self.person else "Unknown",
-            # Ensure these columns are actually defined in your class:
+            "person_name": self.person.name,
+            "group_name": self.group.name if self.group else "Individual",
+            # ROOT LEVEL KEYS (Required by your automated tests)
+            "override_max_assignments": self.override_max_assignments,
+            "override_min_assignments": self.override_min_assignments,
+            "override_seniorityFactor": self.override_seniorityFactor,
+            # Relationships required by the tests
+            "exclusions": (
+                [e.to_dict() for e in self.exclusions]
+                if hasattr(self, "exclusions")
+                else []
+            ),
+            "leaves": (
+                [l.to_dict() for l in self.leaves] if hasattr(self, "leaves") else []
+            ),
+            # NESTED OBJECTS (Required by your React UI logic)
+            "overrides": {
+                "seniorityFactor": self.override_seniorityFactor,
+                "min_assignments": self.override_min_assignments,
+                "max_assignments": self.override_max_assignments,
+            },
+            "group_defaults": {
+                "seniorityFactor": self.group.seniorityFactor if self.group else 1.0,
+                "min_assignments": self.group.min_assignments if self.group else 0,
+                "max_assignments": self.group.max_assignments if self.group else 5,
+            },
             "station_weights": [sw.to_dict() for sw in self.station_weights],
-            "override_seniorityFactor": getattr(self, "override_seniorityFactor", None),
-            "override_min_assignments": getattr(self, "override_min_assignments", None),
-            "override_max_assignments": getattr(self, "override_max_assignments", None),
-            "exclusions": [ex.day_id for ex in self.exclusions],
-            "leaves": [lv.to_dict() for lv in self.leaves],
+            "qualifications": [
+                q.station_id for q in self.person.qualifications if q.is_active
+            ],
         }
 
 

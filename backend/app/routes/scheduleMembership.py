@@ -38,52 +38,37 @@ def get_membership(id):
 
 
 @membership_bp.route("/schedule-memberships", methods=["POST"])
-def add_person_to_schedule_route():
-    """
-    API endpoint to add a person to a specific schedule.
-    It utilizes the utility function to handle station weight initialization.
-    """
+@membership_bp.route("/schedule-memberships", methods=["POST"])
+def add_membership():
     data = request.get_json()
 
-    # 1. Validation: Ensure we have the minimum required IDs
-    schedule_id = data.get("schedule_id")
-    person_id = data.get("person_id")
+    try:
+        # Extract known overrides from the JSON payload
+        overrides = {
+            "override_max_assignments": data.get("override_max_assignments"),
+            "override_min_assignments": data.get("override_min_assignments"),
+            "override_seniorityFactor": data.get("override_seniorityFactor"),
+        }
 
-    if not schedule_id or not person_id:
-        return jsonify({"error": "schedule_id and person_id are required fields"}), 400
-
-    # 2. Prevent Duplicates: Check if this person is already in the schedule
-    exists = (
-        db.session.query(ScheduleMembership)
-        .filter_by(schedule_id=schedule_id, person_id=person_id)
-        .first()
-    )
-
-    if exists:
-        return (
-            jsonify(
-                {"error": "This person is already a member of the selected schedule."}
-            ),
-            400,
+        # Pass them as **kwargs to the utility
+        new_mem = add_person_to_schedule(
+            schedule_id=int(data["schedule_id"]),
+            person_id=int(data["person_id"]),
+            group_id=data.get("group_id"),
+            **overrides,  # This unpacks the dictionary into arguments
         )
 
-    try:
-        # 3. Execution: Call the utility function
-        # We pass 'data' as the overrides dictionary so the utility can
-        # pick up any override_seniorityFactor, etc., if they were provided.
-        new_membership = add_person_to_schedule(schedule_id, person_id, overrides=data)
+        db.session.commit()
+        return jsonify(new_mem.to_dict()), 201
 
-        if not new_membership:
-            return jsonify({"error": "Personnel record not found."}), 404
-
-        # 4. Response: Return the full dictionary including the new station weights
-        return jsonify(new_membership.to_dict()), 201
-
-    except Exception as e:
-        # In case of database or logic errors, rollback is handled by the utility,
-        # but we catch and report the error here for the frontend.
+    except ValueError as e:
         db.session.rollback()
-        return jsonify({"error": f"Failed to initialize membership: {str(e)}"}), 500
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        db.session.rollback()
+        # Log the actual error for debugging
+        print(f"Server Error: {e}")
+        return jsonify({"error": "Internal Server Error"}), 500
 
 
 @membership_bp.route("/schedule-memberships/<int:id>", methods=["PATCH"])

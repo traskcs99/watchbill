@@ -72,3 +72,29 @@ def remove_station_weight(id):
     db.session.delete(entry)
     db.session.commit()
     return jsonify({"message": "Station weight removed"}), 200
+
+
+@membership_station_bp.route(
+    "/schedule-memberships/<int:membership_id>/weights/distribute", methods=["POST"]
+)
+def distribute_weights(membership_id):
+    data = request.get_json()
+    new_weights = data.get("weights")  # Expecting { station_id: 0.5, ... }
+
+    # 1. Validation: Sum must be 1.0 (100%)
+    total = sum(new_weights.values())
+    if abs(total - 1.0) > 0.001:
+        return jsonify({"error": "Total weight must equal 100%"}), 400
+
+    # 2. Update existing or create new
+    # First, clear current weights for this member to ensure a clean slate
+    MembershipStationWeight.query.filter_by(membership_id=membership_id).delete()
+
+    for s_id, val in new_weights.items():
+        nw = MembershipStationWeight(
+            membership_id=membership_id, station_id=int(s_id), weight=val
+        )
+        db.session.add(nw)
+
+    db.session.commit()
+    return jsonify({"message": "Weights updated"}), 200
