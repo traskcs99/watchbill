@@ -47,29 +47,33 @@ export default function ScheduleWorkspace() {
 
     const [assignments, setAssignments] = useState([]); // Add State for Assignments
     const [allLeaves, setAllLeaves] = useState([]); // Add State for Leaves
-    const [allExclusions, setAllExclusions] = useState([]); // Add State for Exclusions
 
-    // -- DATA FETCHING --
+    const [exclusions, setExclusions] = useState([]); // <--- Don't forget to add this state at the top!
+
     const fetchData = useCallback(async () => {
         try {
+            // Note: We added exclusionsRes to the end of this list
             const [schRes, daysRes, summaryRes, masterRes, peopleRes, assignmentsRes, leavesRes, exclusionsRes] = await Promise.all([
                 fetch(`/api/schedules/${scheduleId}`).then(res => res.json()),
                 fetch(`/api/schedules/${scheduleId}/days`).then(res => res.json()),
                 fetch(`/api/schedules/${scheduleId}/summary`).then(res => res.json()),
                 fetch('/api/master-stations').then(res => res.json()),
                 fetch('/api/personnel').then(res => res.json()),
+                // Handle potential 404s for empty data with conditional checks
                 fetch(`/api/schedules/${scheduleId}/assignments`).then(res => res.ok ? res.json() : []),
                 fetch(`/api/leaves?schedule_id=${scheduleId}`).then(res => res.ok ? res.json() : []),
-                fetch(`/api/exclusions/schedule/${scheduleId}`).then(res => res.ok ? res.json(
+                // FIX: Added closing parenthesis and fallback array
+                fetch(`/api/exclusions/schedule/${scheduleId}`).then(res => res.ok ? res.json() : [])
             ]);
+
             setSchedule(schRes);
             setDays(daysRes);
             setSummary(summaryRes);
             setMasterStations(masterRes);
             setAllPersonnel(peopleRes);
-            setAssignments(assignments)
+            setAssignments(assignmentsRes);
             setAllLeaves(leavesRes);
-            setAllExclusions(exclusionsRes);
+            setExclusions(exclusionsRes); // <--- Save the exclusions to state
             setLoading(false);
         } catch (err) {
             console.error("Error loading workspace:", err);
@@ -188,7 +192,7 @@ export default function ScheduleWorkspace() {
                     onSelectDay={setSelectedDay}
                     assignments={assignments} // Pass the data down
                     leaves={allLeaves}        // Pass the data down
-                    exclusions={allExclusions} // Pass the data down
+                    exclusions={exclusions} // Pass the data down
 
                 />
 
