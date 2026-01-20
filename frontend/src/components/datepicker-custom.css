@@ -1,0 +1,17 @@
+.react-datepicker {
+    font-family: "Roboto", "Helvetica", "Arial", sans-serif;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+}
+
+.react-datepicker__header {
+    background-color: #f4f6f8;
+    border-bottom: 1px solid #e0e0e0;
+}
+
+.react-datepicker__day--selected,
+.react-datepicker__day--in-range,
+.react-datepicker__day--in-selecting-range {
+    background-color: #1976d2 !important;
+    color: white !important;
+}

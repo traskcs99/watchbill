@@ -5,30 +5,20 @@ from app.database import db
 
 @pytest.fixture
 def app():
-    # Create a unique name for this test's in-memory DB
-    # 'sqlite:///file:memdb1?mode=memory&cache=shared'
-    test_db_uri = f"sqlite:///:memory:"
-
-    app = create_app()
-    app.config.update(
-        {
-            "TESTING": True,
-            "SQLALCHEMY_DATABASE_URI": test_db_uri,
-            "SQLALCHEMY_TRACK_MODIFICATIONS": False,
-            # This prevents Flask from picking up your local .env file
-            "ENV": "testing",
-        }
-    )
+    # 1. Force the app to use TestConfig
+    app = create_app(config_class=TestConfig)
 
     with app.app_context():
-        # Clean the engine connection before starting
-        db.session.remove()
+        # 2. FORCE DISPOSE of any existing engine connections
+        # This breaks any link to watchbill.db that might have leaked in
         db.engine.dispose()
 
+        # 3. Create tables ONLY in the current context (which is :memory:)
         db.create_all()
+
         yield app
 
-        # Clean up the session so it doesn't hang
+        # 4. Cleanup
         db.session.remove()
         db.drop_all()
         db.engine.dispose()
