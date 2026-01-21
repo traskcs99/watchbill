@@ -51,7 +51,7 @@ export default function ScheduleCalendar({
                                 day={day}
                                 requiredStations={requiredStations}
                                 // Filter data relevant to this specific day
-                                assignments={assignments.filter(a => a.schedule_day_id === day.id)}
+                                assignments={assignments.filter(a => a.day_id === day.id)}
                                 leaves={leaves.filter(l =>
                                     // Check if this day falls within the leave range
                                     new Date(day.date) >= new Date(l.start_date) &&

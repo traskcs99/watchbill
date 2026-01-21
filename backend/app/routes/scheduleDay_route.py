@@ -1,19 +1,46 @@
 from flask import Blueprint, request, jsonify
 from ..database import db
-from ..models import ScheduleDay
+from ..models import ScheduleDay, ScheduleMembership, ScheduleLeave, Person
+from collections import defaultdict
+from datetime import timedelta
+
 
 day_bp = Blueprint("schedule_days", __name__)
 
 
 @day_bp.route("/schedules/<int:schedule_id>/days", methods=["GET"])
 def get_schedule_days(schedule_id):
-    """Fetch all days for a schedule, ordered by calendar date."""
+    # 1. Single query for all days
     days = (
         ScheduleDay.query.filter_by(schedule_id=schedule_id)
         .order_by(ScheduleDay.date)
         .all()
     )
-    return jsonify([d.to_dict() for d in days]), 200
+
+    # 2. Single query for all leaves (Joined with Person to get names)
+    leave_records = (
+        db.session.query(ScheduleLeave, Person.name)
+        .join(ScheduleMembership, ScheduleLeave.membership_id == ScheduleMembership.id)
+        .join(Person, ScheduleMembership.person_id == Person.id)
+        # FIX: Change 'id' to 'schedule_id' here
+        .filter(ScheduleMembership.schedule_id == schedule_id)
+        .all()
+    )
+
+    # 3. Explode ranges into a dictionary
+    leaves_by_date = defaultdict(list)
+    for l, p_name in leave_records:
+        curr = l.start_date
+        while curr <= l.end_date:
+            leaves_by_date[curr.isoformat()].append(
+                {"id": l.id, "person_name": p_name, "reason": l.reason}
+            )
+            curr += timedelta(days=1)
+
+    # 4. Return results
+    return jsonify(
+        [d.to_dict(day_leaves=leaves_by_date.get(d.date.isoformat(), [])) for d in days]
+    )
 
 
 @day_bp.route("/schedule-days/<int:id>", methods=["PATCH"])

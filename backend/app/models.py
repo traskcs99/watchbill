@@ -4,6 +4,8 @@ from typing import Optional, List
 from sqlalchemy import String, Integer, Boolean, Date, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .database import db, migrate
+from collections import defaultdict
+
 
 # --- 1. MASTER DATA ---
 
@@ -161,8 +163,6 @@ class Schedule(db.Model):
     )
 
     def to_dict(self, summary_only=True):
-        # 1. Manually build the dictionary instead of using super()
-        # This confirms we are definitely inside THIS function
         data = {
             "id": self.id,
             "name": self.name,
@@ -173,11 +173,59 @@ class Schedule(db.Model):
             "required_stations": [s.to_dict() for s in self.required_stations],
         }
 
-        if summary_only is False:
-            print(f"DEBUG: INCLUDING DAYS FOR {self.name}")
-            data["days"] = [d.to_dict() for d in self.days]
+        if not summary_only:
+            # 1. Prepare grouping for leaves
+            leaves_by_date = defaultdict(list)
+
+            # 2. Materialize days to a list once to prevent N+1 overhead
+            all_days = list(self.days)
+
+            # 3. Process every membership to find leave overlaps
+            for m in self.memberships:
+                p_name = m.person.name if m.person else "Unknown"
+                for l in m.leaves:
+                    # Ensure we are comparing strings to strings for reliability
+                    start_s = (
+                        l.start_date.isoformat()
+                        if hasattr(l.start_date, "isoformat")
+                        else str(l.start_date)
+                    )
+                    end_s = (
+                        l.end_date.isoformat()
+                        if hasattr(l.end_date, "isoformat")
+                        else str(l.end_date)
+                    )
+
+                    for day_obj in all_days:
+                        day_s = (
+                            day_obj.date.isoformat()
+                            if hasattr(day_obj.date, "isoformat")
+                            else str(day_obj.date)
+                        )
+
+                        # Check if this specific day falls within the leave range
+                        if start_s <= day_s <= end_s:
+                            leaves_by_date[day_s].append(
+                                {"id": l.id, "person_name": p_name, "reason": l.reason}
+                            )
+
+            # 4. Convert Days to dicts, injecting the leaves we just found
+            data["days"] = [
+                d.to_dict(
+                    day_leaves=leaves_by_date.get(
+                        (
+                            d.date.isoformat()
+                            if hasattr(d.date, "isoformat")
+                            else str(d.date)
+                        ),
+                        [],
+                    )
+                )
+                for d in all_days
+            ]
+
+            # 5. Add memberships for the personnel sidebar/logic
             data["memberships"] = [m.to_dict() for m in self.memberships]
-            data["required_stations"] = [s.to_dict() for s in self.required_stations]
 
         return data
 
@@ -203,10 +251,13 @@ class ScheduleDay(db.Model):
 
     schedule: Mapped["Schedule"] = relationship(back_populates="days")
     assignments: Mapped[List["Assignment"]] = relationship(
-        back_populates="day", cascade="all, delete-orphan"
+        back_populates="day", cascade="all, delete-orphan", lazy="selectin"
+    )
+    exclusions: Mapped[List["ScheduleExclusion"]] = relationship(
+        back_populates="day", cascade="all, delete-orphan", lazy="selectin"
     )
 
-    def to_dict(self):
+    def to_dict(self, day_leaves=None):
         return {
             "id": self.id,
             "schedule_id": self.schedule_id,
@@ -220,6 +271,8 @@ class ScheduleDay(db.Model):
             # We don't usually nest all assignments here to keep it light,
             # but we could return the count
             "assignment_count": len(self.assignments),
+            "leaves": day_leaves if day_leaves is not None else [],
+            "exclusions": [e.to_dict() for e in self.exclusions],
         }
 
 

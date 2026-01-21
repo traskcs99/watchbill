@@ -193,6 +193,7 @@ export default function ScheduleWorkspace() {
                     assignments={assignments} // Pass the data down
                     leaves={allLeaves}        // Pass the data down
                     exclusions={exclusions} // Pass the data down
+                    requiredStations={schedule?.required_stations || []}
 
                 />
 

@@ -78,6 +78,8 @@ def get_single_schedule(id):
             # Load Memberships, their Person details, and their Station Weights
             selectinload(Schedule.memberships).options(
                 selectinload(ScheduleMembership.person),
+                selectinload(ScheduleMembership.leaves),
+                selectinload(ScheduleMembership.exclusions),
                 selectinload(ScheduleMembership.station_weights).selectinload(
                     MembershipStationWeight.station
                 ),

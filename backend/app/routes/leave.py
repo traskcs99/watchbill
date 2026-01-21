@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify
 from app import db
-from app.models import ScheduleLeave, ScheduleMembership
+from app.models import ScheduleLeave, ScheduleMembership, Person
 from datetime import datetime
 
 leave_bp = Blueprint("leaves", __name__)
@@ -24,6 +24,31 @@ def validate_leave_logic(start_date, end_date):
 
 
 # --- Routes ---
+
+
+@leave_bp.route("/leaves", methods=["GET"])
+def get_leaves():
+    schedule_id = request.args.get("schedule_id")
+    if not schedule_id:
+        return jsonify({"error": "Missing schedule_id parameter"}), 400
+
+    # Query: Join Leave -> Membership -> Person to get the name
+    results = (
+        db.session.query(ScheduleLeave, Person.name)
+        .join(ScheduleMembership, ScheduleLeave.membership_id == ScheduleMembership.id)
+        .join(Person, ScheduleMembership.person_id == Person.id)
+        .filter(ScheduleMembership.schedule_id == schedule_id)
+        .all()
+    )
+
+    # Serialize results and inject person_name
+    leaves_data = []
+    for leave, person_name in results:
+        leave_dict = leave.to_dict()
+        leave_dict["person_name"] = person_name
+        leaves_data.append(leave_dict)
+
+    return jsonify(leaves_data), 200
 
 
 @leave_bp.route("/leaves", methods=["POST"])
