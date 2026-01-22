@@ -1,49 +1,48 @@
-import React from 'react';
-import { Box, Paper, Typography, Tooltip } from '@mui/material';
-import BlockIcon from '@mui/icons-material/Block';
+import React, { memo, useMemo } from 'react';
+import { Box, Paper, Typography } from '@mui/material';
 
-export default function DayCell({
+const ScheduleDayCell = memo(({
     day,
     requiredStations = [],
     assignments = [],
     leaves = [],
     exclusions = [],
     onInspect
-}) {
+}) => {
     const isHoliday = day.is_holiday;
-    const isLookback = day.is_lookback; // Ensure this comes from your backend
+    const isLookback = day.is_lookback;
 
-    // 1. BASE STYLES: Differentiate between active days, holidays, and lookback days
-    const getPaperStyles = () => {
+
+    // 1. Memoized Styles: Only recalculates if status changes
+    const paperStyles = useMemo(() => {
         if (isLookback) {
             return {
                 bgcolor: '#fcfcfc',
                 borderColor: '#eeeeee',
-                opacity: 0.7, // Makes the whole cell look "faded"
-                filter: 'grayscale(0.5)', // Subtle desaturation
+                opacity: 0.7,
+                filter: 'grayscale(0.5)',
             };
         }
         if (isHoliday) {
             return {
                 boxShadow: '0 0 10px 2px rgba(25, 118, 210, 0.15)',
-                borderColor: '#90caf9', // Light blue border
-                backgroundColor: '#f0f7ff' // Very faint blue tint
+                borderColor: '#90caf9',
+                backgroundColor: '#f0f7ff'
             };
         }
         return {
             bgcolor: 'background.paper',
             borderColor: '#e0e0e0'
         };
-    };
+    }, [isLookback, isHoliday]);
 
-    const getAssignmentForStation = (stationId) => {
-        return assignments.find(a => a.station_id === stationId);
-    };
+    // 2. Pre-extract day number from ISO string
+    const dayNumber = useMemo(() => day.date.split('-')[2], [day.date]);
 
     return (
         <Paper
             elevation={isLookback ? 0 : (isHoliday ? 3 : 1)}
-            onClick={() => !isLookback && onInspect(day)} // Disable click for lookback days if desired
+            onClick={() => !isLookback && onInspect(day)}
             sx={{
                 minHeight: 180,
                 p: 1,
@@ -57,7 +56,7 @@ export default function DayCell({
                     borderColor: isLookback ? '#eeeeee' : '#1976d2',
                     transform: isLookback ? 'none' : 'translateY(-2px)',
                 },
-                ...getPaperStyles()
+                ...paperStyles
             }}
         >
             {/* HEADER: Day Number & Availability Badge */}
@@ -65,12 +64,12 @@ export default function DayCell({
                 <Typography
                     sx={{
                         fontSize: '1.1rem',
-                        fontWeight: isHoliday ? 900 : 400,
+                        fontWeight: isHoliday ? 900 : 500,
                         lineHeight: 1,
                         color: isLookback ? 'text.disabled' : "text.primary"
                     }}
                 >
-                    {new Date(day.date + "T00:00:00").getDate()}
+                    {dayNumber}
                 </Typography>
 
                 {!isLookback && (
@@ -90,19 +89,30 @@ export default function DayCell({
             {/* MIDDLE: Station Rows */}
             <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', gap: 0.6 }}>
                 {requiredStations.map(st => {
-                    const assign = getAssignmentForStation(st.station_id);
+                    const assign = assignments.find(a => a.station_id === st.station_id);
                     const hasAssignment = !!assign?.assigned_person_name;
 
                     return (
-                        <Box key={st.id} sx={{
-                            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                            borderBottom: '1px solid #f5f5f5', pb: 0.3
-                        }}>
-                            <Typography variant="caption" sx={{
-                                fontWeight: 800,
-                                color: isLookback ? 'text.disabled' : 'text.secondary',
-                                fontSize: '0.65rem'
-                            }}>
+                        <Box
+                            key={st.id}
+                            sx={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                borderBottom: '1px solid #f5f5f5',
+                                pb: 0.3,
+                                opacity: isLookback ? 0.6 : 1
+                            }}
+                        >
+                            <Typography
+                                variant="caption"
+                                sx={{
+                                    fontWeight: 200,
+                                    color: isLookback ? 'text.disabled' : 'text.primary',
+                                    fontSize: '0.65rem',
+                                    textTransform: 'uppercase'
+                                }}
+                            >
                                 {st.abbr}:
                             </Typography>
 
@@ -149,7 +159,7 @@ export default function DayCell({
             <Box sx={{ borderTop: '1px solid #eee', pt: 0.5, mt: 'auto', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
                 <Typography variant="caption" sx={{
                     fontSize: '0.6rem',
-                    fontWeight: isLookback ? 400 : (isHoliday ? 900 : 400),
+                    fontWeight: isLookback ? 400 : (isHoliday ? 900 : 500),
                     color: isLookback ? 'text.disabled' : 'text.secondary',
                     textTransform: 'uppercase'
                 }}>
@@ -163,4 +173,6 @@ export default function DayCell({
             </Box>
         </Paper>
     );
-}
+});
+
+export default ScheduleDayCell;
