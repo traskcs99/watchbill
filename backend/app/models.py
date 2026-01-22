@@ -306,7 +306,9 @@ class ScheduleMembership(db.Model):
     exclusions: Mapped[List["ScheduleExclusion"]] = relationship(
         back_populates="membership", cascade="all, delete-orphan"
     )
-    leaves: Mapped[List["ScheduleLeave"]] = relationship()
+    leaves: Mapped[List["ScheduleLeave"]] = relationship(
+        "ScheduleLeave", back_populates="membership", cascade="all, delete-orphan"
+    )
     assignments: Mapped[List["Assignment"]] = relationship(back_populates="membership")
 
     # Inside class ScheduleMembership(db.Model):

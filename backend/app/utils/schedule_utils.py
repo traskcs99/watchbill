@@ -77,23 +77,29 @@ def add_person_to_schedule(schedule_id, person_id, group_id=None, **overrides):
     return new_mem
 
 
+from datetime import timedelta
+
+
 def generate_schedule_days(schedule):
     """
-    Populates a schedule with days.
-    Monday-Thursday: 1.0
-    Friday: 1.5
-    Saturday-Sunday: 2.0
+    Populates a schedule with days including a 3-day lookback.
+    Lookback days: 0.0 weight, is_lookback=True
+    Standard Monday-Thursday: 1.0
+    Standard Friday: 1.5
+    Standard Saturday-Sunday: 2.0
     Holidays: 2.0 (and sets name + is_holiday=True)
     """
-    # 1. Fetch holidays that fall within this schedule's range
+    # 1. Expand holiday search to include the lookback window
+    lookback_start = schedule.start_date - timedelta(days=3)
+
     holidays = Holiday.query.filter(
-        Holiday.date >= schedule.start_date, Holiday.date <= schedule.end_date
+        Holiday.date >= lookback_start, Holiday.date <= schedule.end_date
     ).all()
 
-    # Create a lookup dictionary: {date_object: "Holiday Name"}
     holiday_map = {h.date: h.name for h in holidays}
 
-    current_date = schedule.start_date
+    # 2. Start the loop from the lookback_start
+    current_date = lookback_start
     days_to_add = []
     weekdays_map = [
         "Monday",
@@ -106,26 +112,31 @@ def generate_schedule_days(schedule):
     ]
 
     while current_date <= schedule.end_date:
-        weekday = current_date.weekday()  # 0=Mon, 4=Fri, 5=Sat, 6=Sun
+        weekday = current_date.weekday()
+        is_lookback = current_date < schedule.start_date  # True for the first 3 days
 
-        # Default Weight Logic
-        if weekday < 4:  # Mon, Tue, Wed, Thu
+        # --- Weight Logic ---
+        if is_lookback:
+            day_weight = 0.0  # History has no weight for the current period
+        elif weekday < 4:  # Mon-Thu
             day_weight = 1.0
         elif weekday == 4:  # Fri
             day_weight = 1.5
-        else:  # Sat, Sun
+        else:  # Sat-Sun
             day_weight = 2.0
 
-        # Default name is the Day of the Week
+        # --- Identity Logic ---
         day_name = weekdays_map[weekday]
         is_holiday = False
 
-        # Holiday Override Logic
         if current_date in holiday_map:
-            day_weight = 2.0
+            # Standard days get holiday weight; lookback days stay 0.0
+            if not is_lookback:
+                day_weight = 2.0
             day_name = holiday_map[current_date]
             is_holiday = True
 
+        # --- Create Day ---
         new_day = ScheduleDay(
             schedule_id=schedule.id,
             date=current_date,
@@ -133,12 +144,12 @@ def generate_schedule_days(schedule):
             name=day_name,
             label=None,
             is_holiday=is_holiday,
+            is_lookback=is_lookback,  # Ensure your model has this column
         )
         days_to_add.append(new_day)
         current_date += timedelta(days=1)
 
     db.session.add_all(days_to_add)
-    # The route will handle the commit
 
 
 # app/utils/schedule_utils.py
