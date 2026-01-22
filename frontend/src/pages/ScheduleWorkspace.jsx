@@ -16,6 +16,7 @@ import WeightDistributionDialog from '../components/WeightDistributionDialog';
 // NOTE: Make sure to import your new LeaveManagerDialog here once created
 import LeaveManagerDialog from '../components/LeaveManagerDialog';
 import ScheduleDayCell from '../components/ScheduleDayCell'; // Ensure this is imported if used directly (or via Calendar)
+import DayDetailView from '../components/DayDetailView';
 export default function ScheduleWorkspace() {
     const { scheduleId } = useParams();
 
@@ -174,7 +175,65 @@ export default function ScheduleWorkspace() {
             console.error("Failed to save leave:", err);
         }
     };
+    // --- DAY DETAIL HANDLERS ---
 
+    // 1. Update Name, Holiday, or Weight
+    const handleUpdateDay = useCallback(async (dayId, updates) => {
+        try {
+            const res = await fetch(`/api/schedule-days/${dayId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(updates)
+            });
+            if (res.ok) {
+                // Update local state so the calendar and sidebar reflect the change
+                setDays(prev => prev.map(d => d.id === dayId ? { ...d, ...updates } : d));
+                setSelectedDay(prev => prev?.id === dayId ? { ...prev, ...updates } : prev);
+            }
+        } catch (err) {
+            console.error("Failed to update day:", err);
+        }
+    }, []);
+
+    // 2. Assign a person to a station
+    const handleAssign = useCallback(async (dayId, stationId, membershipId) => {
+        try {
+            const res = await fetch(`/api/assignments/update`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    day_id: dayId,
+                    station_id: stationId,
+                    membership_id: membershipId || null
+                })
+            });
+            if (res.ok) {
+                // Refresh assignments to update the blue/green pills
+                const assignmentsRes = await fetch(`/api/schedules/${scheduleId}/assignments`).then(r => r.json());
+                setAssignments(assignmentsRes);
+            }
+        } catch (err) {
+            console.error("Failed to assign person:", err);
+        }
+    }, [scheduleId]);
+
+    // 3. Toggle manual exclusions
+    const handleToggleExclusion = useCallback(async (dayId, membershipId) => {
+        try {
+            const res = await fetch(`/api/exclusions/toggle`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ schedule_day_id: dayId, membership_id: membershipId })
+            });
+            if (res.ok) {
+                // Refresh exclusions to update the checkboxes
+                const exclusionsRes = await fetch(`/api/exclusions/schedule/${scheduleId}`).then(r => r.json());
+                setExclusions(exclusionsRes);
+            }
+        } catch (err) {
+            console.error("Failed to toggle exclusion:", err);
+        }
+    }, [scheduleId]);
 
     if (loading) return <Box p={5} textAlign="center"><CircularProgress /></Box>;
     if (!schedule) return <Typography p={5}>Schedule not found.</Typography>;
@@ -208,22 +267,16 @@ export default function ScheduleWorkspace() {
 
                     <Box sx={{ p: 2, flexGrow: 1, overflowY: 'auto' }}>
                         {activeTab === 0 && (
-                            <Box>
-                                {selectedDay ? (
-                                    <Box>
-                                        <Box display="flex" justifyContent="space-between" mb={2}>
-                                            <Typography variant="h6">Day Detail</Typography>
-                                            <Button variant="outlined" size="small" onClick={handleClearSelection}>Clear</Button>
-                                        </Box>
-                                        <Divider sx={{ mb: 2 }} />
-                                        <Typography variant="subtitle2">Date: {selectedDay.date}</Typography>
-                                    </Box>
-                                ) : (
-                                    <Box>
-                                        <Typography variant="h6" fontWeight="bold">Schedule Status</Typography>
-                                    </Box>
-                                )}
-                            </Box>
+                            <DayDetailView
+                                day={selectedDay}
+                                requiredStations={schedule.required_stations}
+                                memberships={schedule.memberships}
+                                assignments={assignments.filter(a => a.day_id === selectedDay?.id)}
+                                exclusions={exclusions.filter(e => e.schedule_day_id === selectedDay?.id)}
+                                onUpdateDay={handleUpdateDay}
+                                onAssign={handleAssign}
+                                onToggleExclusion={handleToggleExclusion}
+                            />
                         )}
 
                         {activeTab === 1 && (
