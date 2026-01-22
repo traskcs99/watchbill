@@ -25,9 +25,9 @@ export default function DayCell({
         }
         if (isHoliday) {
             return {
-                boxShadow: '0 0 10px 2px rgba(255, 215, 0, 0.4)',
-                borderColor: '#ffc107',
-                backgroundColor: '#fffdf0'
+                boxShadow: '0 0 10px 2px rgba(25, 118, 210, 0.15)',
+                borderColor: '#90caf9', // Light blue border
+                backgroundColor: '#f0f7ff' // Very faint blue tint
             };
         }
         return {
@@ -65,9 +65,9 @@ export default function DayCell({
                 <Typography
                     sx={{
                         fontSize: '1.1rem',
-                        fontWeight: 800,
+                        fontWeight: isHoliday ? 900 : 400,
                         lineHeight: 1,
-                        color: isLookback ? 'text.disabled' : (isHoliday ? "warning.dark" : "text.primary")
+                        color: isLookback ? 'text.disabled' : "text.primary"
                     }}
                 >
                     {new Date(day.date + "T00:00:00").getDate()}
@@ -149,8 +149,8 @@ export default function DayCell({
             <Box sx={{ borderTop: '1px solid #eee', pt: 0.5, mt: 'auto', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
                 <Typography variant="caption" sx={{
                     fontSize: '0.6rem',
-                    fontWeight: isLookback ? 400 : 800,
-                    color: isLookback ? 'text.disabled' : (isHoliday ? 'warning.dark' : 'text.secondary'),
+                    fontWeight: isLookback ? 400 : (isHoliday ? 900 : 400),
+                    color: isLookback ? 'text.disabled' : 'text.secondary',
                     textTransform: 'uppercase'
                 }}>
                     {isLookback ? 'Historical' : day.name}

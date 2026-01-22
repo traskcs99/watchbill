@@ -1,5 +1,5 @@
 from __future__ import annotations
-from datetime import date
+from datetime import date, timedelta, datetime
 from typing import Optional, List
 from sqlalchemy import String, Integer, Boolean, Date, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -162,70 +162,40 @@ class Schedule(db.Model):
         back_populates="schedule", cascade="all, delete-orphan", lazy="joined"
     )
 
+    def _get_leaves_by_date(self):
+        """Helper to create a map of date strings to lists of leave objects."""
+        leaves_by_date = defaultdict(list)
+
+        # We assume memberships are already joined/loaded to avoid N+1
+        for m in self.memberships:
+            p_name = m.person.name if m.person else "Unknown"
+            for l in m.leaves:
+                curr = l.start_date
+                while curr <= l.end_date:
+                    leaves_by_date[curr.isoformat()].append(
+                        {"id": l.id, "person_name": p_name, "reason": l.reason}
+                    )
+                    curr += timedelta(days=1)
+        return leaves_by_date
+
     def to_dict(self, summary_only=True):
         data = {
             "id": self.id,
             "name": self.name,
-            "start_date": self.start_date.isoformat() if self.start_date else None,
-            "end_date": self.end_date.isoformat() if self.end_date else None,
             "status": self.status,
-            "member_count": len(self.memberships) if self.memberships else 0,
-            "required_stations": [s.to_dict() for s in self.required_stations],
+            "start_date": self.start_date.isoformat(),
+            "end_date": self.end_date.isoformat(),
         }
 
         if not summary_only:
-            # 1. Prepare grouping for leaves
-            leaves_by_date = defaultdict(list)
-
-            # 2. Materialize days to a list once to prevent N+1 overhead
-            all_days = list(self.days)
-
-            # 3. Process every membership to find leave overlaps
-            for m in self.memberships:
-                p_name = m.person.name if m.person else "Unknown"
-                for l in m.leaves:
-                    # Ensure we are comparing strings to strings for reliability
-                    start_s = (
-                        l.start_date.isoformat()
-                        if hasattr(l.start_date, "isoformat")
-                        else str(l.start_date)
-                    )
-                    end_s = (
-                        l.end_date.isoformat()
-                        if hasattr(l.end_date, "isoformat")
-                        else str(l.end_date)
-                    )
-
-                    for day_obj in all_days:
-                        day_s = (
-                            day_obj.date.isoformat()
-                            if hasattr(day_obj.date, "isoformat")
-                            else str(day_obj.date)
-                        )
-
-                        # Check if this specific day falls within the leave range
-                        if start_s <= day_s <= end_s:
-                            leaves_by_date[day_s].append(
-                                {"id": l.id, "person_name": p_name, "reason": l.reason}
-                            )
-
-            # 4. Convert Days to dicts, injecting the leaves we just found
+            # Reuse the helper
+            leaves_map = self._get_leaves_by_date()
             data["days"] = [
-                d.to_dict(
-                    day_leaves=leaves_by_date.get(
-                        (
-                            d.date.isoformat()
-                            if hasattr(d.date, "isoformat")
-                            else str(d.date)
-                        ),
-                        [],
-                    )
-                )
-                for d in all_days
+                d.to_dict(day_leaves=leaves_map.get(d.date.isoformat(), []))
+                for d in self.days
             ]
-
-            # 5. Add memberships for the personnel sidebar/logic
             data["memberships"] = [m.to_dict() for m in self.memberships]
+            data["required_stations"] = [rs.to_dict() for rs in self.required_stations]
 
         return data
 

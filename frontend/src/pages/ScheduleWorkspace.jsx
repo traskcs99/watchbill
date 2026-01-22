@@ -51,29 +51,34 @@ export default function ScheduleWorkspace() {
     const [exclusions, setExclusions] = useState([]); // <--- Don't forget to add this state at the top!
 
     const fetchData = useCallback(async () => {
+        setLoading(true);
         try {
-            // Note: We added exclusionsRes to the end of this list
-            const [schRes, daysRes, summaryRes, masterRes, peopleRes, assignmentsRes, leavesRes, exclusionsRes] = await Promise.all([
+            // 1. Consolidated Requests
+            // We only need the schedule (which includes days, roster, and leaves),
+            // the global master data, and the dynamic operational data (assignments/exclusions).
+            const [schData, masterRes, peopleRes, assignmentsRes, exclusionsRes] = await Promise.all([
                 fetch(`/api/schedules/${scheduleId}`).then(res => res.json()),
-                fetch(`/api/schedules/${scheduleId}/days`).then(res => res.json()),
-                fetch(`/api/schedules/${scheduleId}/summary`).then(res => res.json()),
                 fetch('/api/master-stations').then(res => res.json()),
                 fetch('/api/personnel').then(res => res.json()),
-                // Handle potential 404s for empty data with conditional checks
                 fetch(`/api/schedules/${scheduleId}/assignments`).then(res => res.ok ? res.json() : []),
-                fetch(`/api/leaves?schedule_id=${scheduleId}`).then(res => res.ok ? res.json() : []),
-                // FIX: Added closing parenthesis and fallback array
                 fetch(`/api/exclusions/schedule/${scheduleId}`).then(res => res.ok ? res.json() : [])
             ]);
 
-            setSchedule(schRes);
-            setDays(daysRes);
-            setSummary(summaryRes);
+            // 2. Map Deep Data to State
+            // schData now acts as the 'Single Source of Truth' for the schedule structure
+            setSchedule(schData);
+            setSummary(schData); // Keeping summary for ConfigurationTab compatibility
+            setDays(schData.days || []);
+
+            // Use the exploded leaves from the schedule object for the calendar view
+            setAllLeaves(schData.leaves_exploded || []);
+
+            // 3. Set Global and Dynamic Data
             setMasterStations(masterRes);
             setAllPersonnel(peopleRes);
             setAssignments(assignmentsRes);
-            setAllLeaves(leavesRes);
-            setExclusions(exclusionsRes); // <--- Save the exclusions to state
+            setExclusions(exclusionsRes);
+
             setLoading(false);
         } catch (err) {
             console.error("Error loading workspace:", err);

@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify
 from ..database import db
-from ..models import ScheduleDay, ScheduleMembership, ScheduleLeave, Person
+from ..models import ScheduleDay, ScheduleMembership, ScheduleLeave, Person, Schedule
 from collections import defaultdict
 from datetime import timedelta
 
@@ -11,35 +11,20 @@ day_bp = Blueprint("schedule_days", __name__)
 @day_bp.route("/schedules/<int:schedule_id>/days", methods=["GET"])
 def get_schedule_days(schedule_id):
     # 1. Single query for all days
-    days = (
-        ScheduleDay.query.filter_by(schedule_id=schedule_id)
-        .order_by(ScheduleDay.date)
-        .all()
-    )
+    schedule = Schedule.query.options(
+        db.joinedload(Schedule.memberships).joinedload(ScheduleMembership.leaves),
+        db.joinedload(Schedule.memberships).joinedload(ScheduleMembership.person),
+    ).get_or_404(schedule_id)
 
-    # 2. Single query for all leaves (Joined with Person to get names)
-    leave_records = (
-        db.session.query(ScheduleLeave, Person.name)
-        .join(ScheduleMembership, ScheduleLeave.membership_id == ScheduleMembership.id)
-        .join(Person, ScheduleMembership.person_id == Person.id)
-        # FIX: Change 'id' to 'schedule_id' here
-        .filter(ScheduleMembership.schedule_id == schedule_id)
-        .all()
-    )
+    # Use the shared logic from the model
+    leaves_map = schedule._get_leaves_by_date()
 
-    # 3. Explode ranges into a dictionary
-    leaves_by_date = defaultdict(list)
-    for l, p_name in leave_records:
-        curr = l.start_date
-        while curr <= l.end_date:
-            leaves_by_date[curr.isoformat()].append(
-                {"id": l.id, "person_name": p_name, "reason": l.reason}
-            )
-            curr += timedelta(days=1)
-
-    # 4. Return results
+    # Return the days using the standard Day to_dict
     return jsonify(
-        [d.to_dict(day_leaves=leaves_by_date.get(d.date.isoformat(), [])) for d in days]
+        [
+            d.to_dict(day_leaves=leaves_map.get(d.date.isoformat(), []))
+            for d in schedule.days
+        ]
     )
 
 
