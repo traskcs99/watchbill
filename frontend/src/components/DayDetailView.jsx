@@ -14,13 +14,23 @@ export default function DayDetailView({
     onAssign,
     onToggleExclusion
 }) {
+    // 🟢 MODIFICATION: Removed the guard clause that returned null for lookback days.
     if (!day) return <Typography color="text.disabled" variant="body2">Select a day to begin.</Typography>;
 
     return (
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             {/* 1. HEADER */}
             <Box>
-                <Typography variant="caption" sx={{ fontWeight: 800, color: 'text.secondary' }}>DAY LABEL</Typography>
+                <Box display="flex" justifyContent="space-between" alignItems="center">
+                    <Typography variant="caption" sx={{ fontWeight: 800, color: 'text.secondary' }}>
+                        {day.is_lookback ? 'HISTORICAL DAY' : 'DAY LABEL'}
+                    </Typography>
+                    {day.is_lookback && (
+                        <Typography variant="caption" sx={{ color: 'warning.main', fontWeight: 900 }}>
+                            EDITABLE
+                        </Typography>
+                    )}
+                </Box>
                 <TextField
                     fullWidth
                     variant="standard"
@@ -33,13 +43,18 @@ export default function DayDetailView({
             <Box display="flex" justifyContent="space-between" alignItems="center">
                 <Box display="flex" alignItems="center" gap={0.5}>
                     <Typography variant="caption" sx={{ fontWeight: 700 }}>HOLIDAY</Typography>
-                    <Switch size="small" checked={day.is_holiday} onChange={(e) => onUpdateDay(day.id, { is_holiday: e.target.checked })} />
+                    <Switch
+                        size="small"
+                        checked={day.is_holiday}
+                        onChange={(e) => onUpdateDay(day.id, { is_holiday: e.target.checked })}
+                    />
                 </Box>
                 <Box display="flex" alignItems="center" gap={1}>
                     <Typography variant="caption" sx={{ fontWeight: 700 }}>WEIGHT</Typography>
                     <TextField
                         type="number" variant="standard" sx={{ width: 40 }}
-                        value={day.weight} onChange={(e) => onUpdateDay(day.id, { weight: parseFloat(e.target.value) })}
+                        value={day.weight}
+                        onChange={(e) => onUpdateDay(day.id, { weight: parseFloat(e.target.value) })}
                     />
                 </Box>
             </Box>
@@ -57,23 +72,23 @@ export default function DayDetailView({
                             <InputLabel sx={{ fontSize: '0.75rem' }}>{st.abbr}</InputLabel>
                             <Select
                                 label={st.abbr}
-                                sx={{ fontSize: '0.85rem', height: '38px' }}
+                                sx={{
+                                    fontSize: '0.85rem',
+                                    height: '38px',
+                                    // 🟢 Added a subtle background color for lookback days to signal historical mode
+                                    bgcolor: day.is_lookback ? 'action.hover' : 'transparent'
+                                }}
                                 value={currentAssign?.membership_id || ""}
                                 onChange={(e) => onAssign(day.id, st.station_id, e.target.value)}
                             >
                                 <MenuItem value=""><em>Unassigned</em></MenuItem>
                                 {memberships
                                     .filter(m => {
-                                        // Qualification Check
                                         const isQual = m.qualifications?.some(q => Number(q.station_id || q) === Number(st.station_id));
-
-                                        // Leave Check: STRICTLY use membership_id
                                         const onLeave = day.leaves?.some(l => Number(l.membership_id) === Number(m.id));
-
                                         return isQual && !onLeave;
                                     })
                                     .map(m => {
-                                        // Exclusion Check: STRICTLY use membership_id
                                         const isEx = Array.isArray(exclusions) && exclusions.some(e =>
                                             Number(e.day_id) === Number(day.id) &&
                                             Number(e.membership_id) === Number(m.id)
@@ -106,13 +121,10 @@ export default function DayDetailView({
             <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0.5, maxHeight: 300, overflowY: 'auto' }}>
                 {memberships.map(m => {
                     const memberId = m.id;
-
                     const isEx = Array.isArray(exclusions) && exclusions.some(e =>
                         Number(e.day_id) === Number(day.id) &&
                         Number(e.membership_id) === Number(memberId)
                     );
-
-                    // Leave check using the membership_id we added to the model
                     const onLeave = day.leaves?.some(l => Number(l.membership_id) === Number(memberId));
 
                     return (
@@ -122,7 +134,6 @@ export default function DayDetailView({
                             sx={{
                                 display: 'flex', alignItems: 'center', p: 0.4, borderRadius: 1,
                                 cursor: onLeave ? 'default' : 'pointer',
-                                // Make the background subtly different if on leave
                                 bgcolor: onLeave ? 'action.hover' : 'transparent',
                                 opacity: onLeave ? 0.7 : 1,
                                 '&:hover': { bgcolor: onLeave ? 'transparent' : '#f5f5f5' }
@@ -130,7 +141,6 @@ export default function DayDetailView({
                         >
                             <Checkbox
                                 size="small"
-                                // Checkbox shows checked for both exclusions and leave
                                 checked={Boolean(isEx || onLeave)}
                                 disabled={onLeave}
                                 sx={{ p: 0 }}
@@ -147,7 +157,8 @@ export default function DayDetailView({
                                     textDecoration: (isEx || onLeave) ? 'line-through' : 'none'
                                 }}>
                                     {m.name || m.person_name}
-                                </Box>                                {onLeave && (
+                                </Box>
+                                {onLeave && (
                                     <Box component="span" sx={{
                                         fontSize: '0.65rem',
                                         color: 'text.disabled',

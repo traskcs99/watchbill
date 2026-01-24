@@ -42,7 +42,7 @@ const ScheduleDayCell = memo(({
     return (
         <Paper
             elevation={isLookback ? 0 : (isHoliday ? 3 : 1)}
-            onClick={() => !isLookback && onInspect(day)}
+            onClick={() => onInspect(day)}
             sx={{
                 minHeight: 180,
                 p: 1,
