@@ -66,16 +66,16 @@ def test_get_single_schedule_full_load(client, session):
 
     data = response.json
     assert "days" in data  # This will now pass
-    assert len(data["days"]) == 5
+    assert len(data["days"]) == 8
 
     # 4. Verify your Weight Logic worked
     # Jan 1st (Holiday)
-    assert data["days"][0]["weight"] == 2.0
-    assert data["days"][0]["is_holiday"] is True
-    assert data["days"][0]["name"] == "New Year's Day"
+    assert data["days"][3]["weight"] == 2.0
+    assert data["days"][3]["is_holiday"] is True
+    assert data["days"][3]["name"] == "New Year's Day"
 
     # Jan 5th (Monday)
-    assert data["days"][4]["weight"] == 1.0
+    assert data["days"][7]["weight"] == 1.0
 
 
 def test_delete_schedule_cascades(client, session):
@@ -166,20 +166,20 @@ def test_schedule_weight_calculation_logic(client, session):
     days = response.json["days"]
 
     # Day 0: Friday (Jan 16) -> 1.5
-    assert days[0]["date"] == "2026-01-16"
-    assert days[0]["weight"] == 1.5
+    assert days[3]["date"] == "2026-01-16"
+    assert days[3]["weight"] == 1.5
 
     # Day 1: Saturday (Jan 17) -> 2.0
-    assert days[1]["weight"] == 2.0
+    assert days[4]["weight"] == 2.0
 
     # Day 2: Sunday (Jan 18) -> 2.0
-    assert days[2]["weight"] == 2.0
+    assert days[5]["weight"] == 2.0
 
     # Day 3: Monday (Jan 19) -> 2.0 (Holiday Override)
-    assert days[3]["date"] == "2026-01-19"
-    assert days[3]["weight"] == 2.0
-    assert days[3]["name"] == "MLK Day"
-    assert days[3]["is_holiday"] is True
+    assert days[6]["date"] == "2026-01-19"
+    assert days[6]["weight"] == 2.0
+    assert days[6]["name"] == "MLK Day"
+    assert days[6]["is_holiday"] is True
 
 
 def test_prevent_duplicate_schedule_days(session):
@@ -218,7 +218,7 @@ def test_schedule_cascade_delete(client, session):
     sch_id = res.json["id"]
 
     # Verify days exist in DB
-    assert session.query(ScheduleDay).filter_by(schedule_id=sch_id).count() == 5
+    assert session.query(ScheduleDay).filter_by(schedule_id=sch_id).count() == 8
 
     # 2. Delete the schedule
     client.delete(f"/api/schedules/{sch_id}")

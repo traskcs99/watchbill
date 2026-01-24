@@ -23,7 +23,7 @@ export default function ScheduleCalendar({
     const exclusionsByDay = useMemo(() => {
         const map = {};
         exclusions.forEach(e => {
-            const dId = e.schedule_day_id;
+            const dId = e.day_id;
             if (!map[dId]) map[dId] = [];
             map[dId].push(e);
         });

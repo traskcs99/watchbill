@@ -5,6 +5,7 @@ from ..models import Assignment, ScheduleMembership
 
 assignment_bp = Blueprint("assignments", __name__)
 
+
 # --- GET ALL (Optimized with Eager Loading) ---
 @assignment_bp.route("/schedules/<int:schedule_id>/assignments", methods=["GET"])
 def get_schedule_assignments(schedule_id):
@@ -12,16 +13,20 @@ def get_schedule_assignments(schedule_id):
     Fetch all slots for a month.
     Uses joinedload to prevent N+1 queries for station and person names.
     """
-    assignments = db.session.query(Assignment).filter_by(
-        schedule_id=schedule_id
-    ).options(
-        joinedload(Assignment.master_station),
-        joinedload(Assignment.day),
-        # Nested join: Membership -> Person
-        joinedload(Assignment.membership).joinedload(ScheduleMembership.person)
-    ).all()
-    
+    assignments = (
+        db.session.query(Assignment)
+        .filter_by(schedule_id=schedule_id)
+        .options(
+            joinedload(Assignment.master_station),
+            joinedload(Assignment.day),
+            # Nested join: Membership -> Person
+            joinedload(Assignment.membership).joinedload(ScheduleMembership.person),
+        )
+        .all()
+    )
+
     return jsonify([a.to_dict() for a in assignments]), 200
+
 
 # --- GET ONE ---
 @assignment_bp.route("/assignments/<int:id>", methods=["GET"])
@@ -30,6 +35,7 @@ def get_assignment(id):
     if not assignment:
         return jsonify({"error": "Assignment not found"}), 404
     return jsonify(assignment.to_dict()), 200
+
 
 # --- PATCH (Manual Override & Availability) ---
 @assignment_bp.route("/assignments/<int:id>", methods=["PATCH"])
@@ -58,6 +64,7 @@ def patch_assignment(id):
 
     db.session.commit()
     return jsonify(assignment.to_dict()), 200
+
 
 # --- DELETE ---
 @assignment_bp.route("/assignments/<int:id>", methods=["DELETE"])

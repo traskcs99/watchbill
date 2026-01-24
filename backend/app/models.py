@@ -169,11 +169,18 @@ class Schedule(db.Model):
         # We assume memberships are already joined/loaded to avoid N+1
         for m in self.memberships:
             p_name = m.person.name if m.person else "Unknown"
+            p_id = m.person.id if m.person else None
             for l in m.leaves:
                 curr = l.start_date
                 while curr <= l.end_date:
                     leaves_by_date[curr.isoformat()].append(
-                        {"id": l.id, "person_name": p_name, "reason": l.reason}
+                        {
+                            "id": l.id,
+                            "person_name": p_name,
+                            "reason": l.reason,
+                            "membership_id": m.id,
+                            "person_id": p_id,
+                        }
                     )
                     curr += timedelta(days=1)
         return leaves_by_date
@@ -434,6 +441,7 @@ class ScheduleExclusion(db.Model):
         return {
             "id": self.id,
             "day_id": self.day_id,  # <--- FIX: Changed from schedule_day_id
+            "membership_id": self.membership_id,
             "person_id": person.id if person else None,
             "person_name": person.name if person else "Unknown",
             "date": self.day.date.isoformat() if self.day and self.day.date else None,

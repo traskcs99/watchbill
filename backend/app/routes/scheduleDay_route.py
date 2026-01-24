@@ -10,11 +10,21 @@ day_bp = Blueprint("schedule_days", __name__)
 
 @day_bp.route("/schedules/<int:schedule_id>/days", methods=["GET"])
 def get_schedule_days(schedule_id):
-    # 1. Single query for all days
-    schedule = Schedule.query.options(
-        db.joinedload(Schedule.memberships).joinedload(ScheduleMembership.leaves),
-        db.joinedload(Schedule.memberships).joinedload(ScheduleMembership.person),
-    ).get_or_404(schedule_id)
+    # 1. Modern SQLAlchemy 2.0 / Flask-SQLAlchemy 3.0 syntax
+    # This avoids the LegacyAPIWarning and handles the 404
+    stmt = (
+        db.select(Schedule)
+        .options(
+            db.joinedload(Schedule.memberships).joinedload(ScheduleMembership.leaves),
+            db.joinedload(Schedule.memberships).joinedload(ScheduleMembership.person),
+        )
+        .filter_by(id=schedule_id)
+    )
+
+    schedule = db.session.execute(stmt).unique().scalar_one_or_none()
+
+    if not schedule:
+        return jsonify({"error": "Schedule not found"}), 404
 
     # Use the shared logic from the model
     leaves_map = schedule._get_leaves_by_date()

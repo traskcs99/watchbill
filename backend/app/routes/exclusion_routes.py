@@ -137,3 +137,38 @@ def delete_exclusion(id):
     db.session.delete(exc)
     db.session.commit()
     return jsonify({"message": "Exclusion removed"}), 200
+
+
+@exclusion_bp.route("/exclusions/toggle", methods=["POST"])
+def toggle_exclusion():
+    try:
+        data = request.get_json()
+        day_id = data.get("day_id")
+        membership_id = data.get("membership_id")
+
+        if not day_id or not membership_id:
+            return jsonify({"error": "Missing day_id or membership_id"}), 400
+
+        # 1. Look for an existing exclusion
+        existing = ScheduleExclusion.query.filter_by(
+            day_id=day_id, membership_id=membership_id
+        ).first()
+
+        if existing:
+            # 2. If it exists, the user is "unchecking" the box -> Delete it
+            db.session.delete(existing)
+            message = "Exclusion removed"
+        else:
+            # 3. If it doesn't exist, the user is "checking" the box -> Create it
+            new_exclusion = ScheduleExclusion(
+                day_id=day_id, membership_id=membership_id
+            )
+            db.session.add(new_exclusion)
+            message = "Exclusion added"
+
+        db.session.commit()
+        return jsonify({"message": message}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 400

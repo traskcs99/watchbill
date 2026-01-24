@@ -14,36 +14,25 @@ from app.models import (
 
 @pytest.fixture
 def exclusion_env(session):
-    """
-    Sets up the complete environment needed to test exclusions.
-    Returns a dictionary containing all created objects.
-    """
-    # 1. Create a Group (Required for Membership)
     grp = Group(name="Exclusion Group")
     session.add(grp)
     session.flush()
 
-    # 2. Create Schedule
     sch = Schedule(
         name="Exclusion Test Schedule",
         start_date=date(2026, 1, 1),
         end_date=date(2026, 1, 31),
     )
 
-    # 3. Create Person
     p = Person(name="Excluded Person")
-
     session.add_all([sch, p])
     session.flush()
 
-    # 4. Create ScheduleDay (The target of the exclusion)
-    # We create two days to help with batch testing
     day1 = ScheduleDay(schedule_id=sch.id, date=date(2026, 1, 10), weight=1.0)
     day2 = ScheduleDay(schedule_id=sch.id, date=date(2026, 1, 11), weight=1.0)
     session.add_all([day1, day2])
     session.flush()
 
-    # 5. Create Membership (Links Person to Schedule)
     mem = ScheduleMembership(schedule_id=sch.id, person_id=p.id, group_id=grp.id)
     session.add(mem)
     session.commit()
@@ -250,3 +239,48 @@ def test_get_exclusions_n_plus_one_check(
     assert len(data) == 1
     assert data[0]["person_name"] == "Excluded Guy"
     assert data[0]["date"] == "2026-01-15"
+
+
+def test_toggle_exclusion_flow(client, session, exclusion_env):
+    """Verify that calling toggle once adds, and calling again removes."""
+    payload = {
+        "day_id": exclusion_env["day1"].id,
+        "membership_id": exclusion_env["membership"].id,
+    }
+
+    # 1. First call: Should Create
+    res1 = client.post("/api/exclusions/toggle", json=payload)
+    assert res1.status_code == 200
+    assert res1.json["message"] == "Exclusion added"
+    assert session.query(ScheduleExclusion).count() == 1
+
+    # 2. Second call: Should Delete
+    res2 = client.post("/api/exclusions/toggle", json=payload)
+    assert res2.status_code == 200
+    assert res2.json["message"] == "Exclusion removed"
+    assert session.query(ScheduleExclusion).count() == 0
+
+
+# --- Create Tests (POST) ---
+
+
+def test_get_exclusions_by_schedule(client, session, exclusion_env):
+    """Verify fetching all exclusions for a specific schedule."""
+    # Setup: Create one
+    exc = ScheduleExclusion(
+        membership_id=exclusion_env["membership"].id,
+        day_id=exclusion_env["day1"].id,
+        reason="Medical",
+    )
+    session.add(exc)
+    session.commit()
+
+    response = client.get(f"/api/exclusions/schedule/{exclusion_env['schedule'].id}")
+
+    assert response.status_code == 200
+    data = response.json
+    assert len(data) == 1
+    # Check that your to_dict() returns these joined fields
+    assert "person_name" in data[0]
+    assert data[0]["person_name"] == "Excluded Person"
+    assert data[0]["date"] == "2026-01-10"

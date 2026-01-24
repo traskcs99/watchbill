@@ -34,16 +34,23 @@ def day_env(session):
 # --- 1. READ TESTS ---
 
 
-def test_get_days_for_schedule(client, day_env):
+def test_get_days_for_schedule(client, session, day_env):  # 1. Added session fixture
     """Verify we can fetch the full calendar for a schedule."""
     sch_id = day_env["schedule"].id
     res = client.get(f"/api/schedules/{sch_id}/days")
 
     assert res.status_code == 200
     assert len(res.json) == 3
-    # Ensure they are sorted by date
+
+    # 2. Verify sorting by date
     assert res.json[0]["date"] == "2026-01-01"
     assert res.json[1]["date"] == "2026-01-02"
+    assert res.json[2]["date"] == "2026-01-03"
+
+    # 3. Use modern SQLAlchemy 2.0 syntax if you need to fetch from DB in a test
+    # Instead of ScheduleDay.query.get(id), use:
+    # day = session.get(ScheduleDay, day_env["day1"].id)
+    # assert day.weight == 1.0
 
 
 # --- 2. UPDATE (PATCH) TESTS ---

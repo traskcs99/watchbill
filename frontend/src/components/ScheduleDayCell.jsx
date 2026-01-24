@@ -154,7 +154,22 @@ const ScheduleDayCell = memo(({
                     </Box>
                 )}
             </Box>
-
+            {/* NEW EXCLUSION SECTION */}
+            {exclusions.length > 0 && (
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 0.5 }}>
+                    <Typography sx={{ fontSize: '0.55rem', fontWeight: 900, color: 'text.disabled' }}>EX:</Typography>
+                    {exclusions.map((ex, i) => (
+                        <Box key={i} sx={{
+                            bgcolor: isLookback ? '#f5f5f5' : '#f5f5f5', // Neutral Grey
+                            color: '#616161',
+                            border: '1px solid #e0e0e0',
+                            borderRadius: '4px', px: 0.5, py: 0.1, fontSize: '0.55rem', fontWeight: 'bold'
+                        }}>
+                            {ex.person_name}
+                        </Box>
+                    ))}
+                </Box>
+            )}
             {/* FOOTER: Fixed Layout */}
             <Box sx={{ borderTop: '1px solid #eee', pt: 0.5, mt: 'auto', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
                 <Typography variant="caption" sx={{
@@ -171,7 +186,7 @@ const ScheduleDayCell = memo(({
                     </Typography>
                 )}
             </Box>
-        </Paper>
+        </Paper >
     );
 });
 

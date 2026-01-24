@@ -197,25 +197,36 @@ export default function ScheduleWorkspace() {
 
     // 2. Assign a person to a station
     const handleAssign = useCallback(async (dayId, stationId, membershipId) => {
+        // 1. Find the assignment record for this specific day/station to get its ID
+        const targetAssignment = assignments.find(
+            a => a.day_id === dayId && a.station_id === stationId
+        );
+
+        if (!targetAssignment) {
+            console.error("No assignment slot found for this day/station");
+            return;
+        }
+
         try {
-            const res = await fetch(`/api/assignments/update`, {
-                method: 'POST',
+            // 2. Use your existing PATCH route with the assignment ID
+            const res = await fetch(`/api/assignments/${targetAssignment.id}`, {
+                method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    day_id: dayId,
-                    station_id: stationId,
-                    membership_id: membershipId || null
+                    membership_id: membershipId || null,
+                    is_locked: true // Lock it since a human made this choice
                 })
             });
+
             if (res.ok) {
-                // Refresh assignments to update the blue/green pills
+                // 3. Refresh assignments so the UI updates
                 const assignmentsRes = await fetch(`/api/schedules/${scheduleId}/assignments`).then(r => r.json());
                 setAssignments(assignmentsRes);
             }
         } catch (err) {
-            console.error("Failed to assign person:", err);
+            console.error("Failed to patch assignment:", err);
         }
-    }, [scheduleId]);
+    }, [assignments, scheduleId]);
 
     // 3. Toggle manual exclusions
     const handleToggleExclusion = useCallback(async (dayId, membershipId) => {
@@ -223,7 +234,7 @@ export default function ScheduleWorkspace() {
             const res = await fetch(`/api/exclusions/toggle`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ schedule_day_id: dayId, membership_id: membershipId })
+                body: JSON.stringify({ day_id: dayId, membership_id: membershipId })
             });
             if (res.ok) {
                 // Refresh exclusions to update the checkboxes
@@ -272,7 +283,7 @@ export default function ScheduleWorkspace() {
                                 requiredStations={schedule.required_stations}
                                 memberships={schedule.memberships}
                                 assignments={assignments.filter(a => a.day_id === selectedDay?.id)}
-                                exclusions={exclusions.filter(e => e.schedule_day_id === selectedDay?.id)}
+                                exclusions={exclusions.filter(e => e.day_id === selectedDay?.id)}
                                 onUpdateDay={handleUpdateDay}
                                 onAssign={handleAssign}
                                 onToggleExclusion={handleToggleExclusion}
