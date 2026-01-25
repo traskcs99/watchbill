@@ -10,6 +10,7 @@ from ..models import (
 from ..utils.schedule_utils import generate_schedule_days, populate_holiday_table
 from ..utils.schedule_summary_util import get_schedule_summary_data
 from ..utils.quota_calculator import calculate_schedule_quotas
+from ..utils.schedule_validator import validate_schedule
 from datetime import datetime, date
 
 schedule_bp = Blueprint("schedules", __name__)
@@ -134,4 +135,17 @@ def get_schedule_quotas(schedule_id):
     except Exception as e:
         # Log the error so you can see it in pytest -s
         print(f"Quota Route Error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@schedule_bp.route("/schedules/<int:schedule_id>/alerts", methods=["GET"])
+def get_schedule_alerts(schedule_id):
+    """
+    Returns a list of validation alerts for the schedule.
+    """
+    try:
+        alerts = validate_schedule(schedule_id)
+        return jsonify(alerts), 200
+    except Exception as e:
+        print(f"Validator Error: {e}")
         return jsonify({"error": str(e)}), 500

@@ -6,6 +6,7 @@ import {
 import DeleteIcon from '@mui/icons-material/Delete';
 import PeopleIcon from '@mui/icons-material/People';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
+import SettingsIcon from '@mui/icons-material/Settings'; // 🟢 NEW IMPORT
 
 // StatItem helper stays here as it's private to this list item
 const StatItem = ({ label, override, groupDefault }) => {
@@ -34,7 +35,8 @@ export default function PersonnelListItem({
     onRemove,
     onOpenLeave,
     onOpenWeight,
-    onDeleteLeave
+    onDeleteLeave,
+    onOpenConfig // 🟢 NEW PROP
 }) {
 
     // --- LEAVE PILL LOGIC ---
@@ -93,8 +95,7 @@ export default function PersonnelListItem({
                             <IconButton
                                 size="small"
                                 onClick={(e) => {
-                                    e.stopPropagation(); // <--- CRITICAL: Prevents the click from hitting the ListItem
-                                    console.log("Button clicked in Item Component");
+                                    e.stopPropagation();
                                     onOpenLeave(member);
                                 }}
                             >
@@ -107,10 +108,30 @@ export default function PersonnelListItem({
                 secondary={
                     <Box sx={{ mt: 1 }}>
                         {/* Stats Section */}
-                        <Box display="flex" gap={2} mb={1}>
+                        <Box display="flex" gap={2} mb={1} alignItems="flex-end">
                             <StatItem label="Min" override={member.overrides?.min_assignments} groupDefault={member.group_defaults?.min_assignments} />
                             <StatItem label="Max" override={member.overrides?.max_assignments} groupDefault={member.group_defaults?.max_assignments} />
-                            <StatItem label="Seniority" override={member.overrides?.seniorityFactor} groupDefault={member.group_defaults?.seniorityFactor} />
+
+                            {/* 🟢 Modified Seniority Section with Gear Icon */}
+                            <Box display="flex" alignItems="center">
+                                <StatItem label="Seniority" override={member.overrides?.seniorityFactor} groupDefault={member.group_defaults?.seniorityFactor} />
+                                <Tooltip title="Edit Seniority & Limits">
+                                    <IconButton
+                                        size="small"
+                                        onClick={() => onOpenConfig(member)}
+                                        sx={{
+                                            ml: 0.5,
+                                            p: 0.5,
+                                            // Highlight gear if any override exists
+                                            color: (member.overrides?.seniorityFactor || member.overrides?.min_assignments || member.overrides?.max_assignments)
+                                                ? 'primary.main'
+                                                : 'action.disabled'
+                                        }}
+                                    >
+                                        <SettingsIcon sx={{ fontSize: 14 }} />
+                                    </IconButton>
+                                </Tooltip>
+                            </Box>
                         </Box>
 
                         {/* Qualifications & Weights */}

@@ -3,7 +3,7 @@ import {
     Box, Typography, Button, Chip, Divider, List
 } from '@mui/material';
 import PeopleIcon from '@mui/icons-material/People';
-import PersonnelListItem from './PersonnelListItem'; // Import the new component
+import PersonnelListItem from './PersonnelListItem';
 
 export default function ConfigurationTab({
     summary,
@@ -14,7 +14,8 @@ export default function ConfigurationTab({
     onAddMemberClick,
     onOpenWeightSlider,
     onOpenLeave,
-    onDeleteLeave
+    onDeleteLeave,
+    onOpenMemberConfig // 🟢 Received here
 }) {
 
     return (
@@ -52,6 +53,9 @@ export default function ConfigurationTab({
                         onOpenLeave={onOpenLeave}
                         onOpenWeight={onOpenWeightSlider}
                         onDeleteLeave={onDeleteLeave}
+
+                        // 🟢 PASS THE CONFIG HANDLER DOWN
+                        onOpenConfig={onOpenMemberConfig}
                     />
                 ))}
             </List>
