@@ -7,9 +7,11 @@ export default function ScheduleCalendar({
     assignments,
     exclusions,
     requiredStations,
+    selectedDayId,
+    memberships, // <--- NEW: Needed for math
     onSelectDay
 }) {
-    // 1. Group assignments by day_id ONCE
+    // 1. Group assignments by day_id ONCE (Your original logic)
     const assignmentsByDay = useMemo(() => {
         const map = {};
         assignments.forEach(a => {
@@ -19,7 +21,7 @@ export default function ScheduleCalendar({
         return map;
     }, [assignments]);
 
-    // 2. Group exclusions by day_id ONCE
+    // 2. Group exclusions by day_id ONCE (Your original logic)
     const exclusionsByDay = useMemo(() => {
         const map = {};
         exclusions.forEach(e => {
@@ -42,11 +44,18 @@ export default function ScheduleCalendar({
                     key={day.id}
                     day={day}
                     requiredStations={requiredStations}
-                    // Pass the pre-grouped array. If empty, pass static empty array.
+
+                    // --- PRESERVED LOCAL DATA (For Display) ---
                     assignments={assignmentsByDay[day.id] || []}
                     exclusions={exclusionsByDay[day.id] || []}
-                    // Since we refactored backend, use day.leaves directly
                     leaves={day.leaves || []}
+                    isSelected={day.id === selectedDayId}
+                    // --- NEW GLOBAL DATA (For Calculator) ---
+                    allAssignments={assignments} // Raw list
+                    allExclusions={exclusions}   // Raw list
+                    allDays={days}               // Raw list
+                    memberships={memberships}    // Needed for weights
+                    isSelected={Number(day.id) === Number(selectedDayId)}
                     onInspect={onSelectDay}
                 />
             ))}

@@ -260,12 +260,12 @@ export default function ScheduleWorkspace() {
                 {/* 1. CALENDAR COMPONENT */}
                 <ScheduleCalendar
                     days={days}
-                    selectedDay={selectedDay}
-                    // 🟢 Passing the memoized handler here
+                    selectedDayId={selectedDay?.id}                    // 🟢 Passing the memoized handler here
                     onSelectDay={handleSelectDay}
                     assignments={assignments}
                     leaves={allLeaves}
                     exclusions={exclusions}
+                    memberships={schedule.memberships}
                     requiredStations={schedule?.required_stations || []}
                 />
 
@@ -280,8 +280,10 @@ export default function ScheduleWorkspace() {
                         {activeTab === 0 && (
                             <DayDetailView
                                 day={selectedDay}
+                                days={days}
                                 requiredStations={schedule.required_stations}
                                 memberships={schedule.memberships}
+                                allAssignments={assignments}
                                 assignments={assignments.filter(a => a.day_id === selectedDay?.id)}
                                 exclusions={exclusions.filter(e => e.day_id === selectedDay?.id)}
                                 onUpdateDay={handleUpdateDay}

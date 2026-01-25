@@ -1,20 +1,43 @@
 import React, { memo, useMemo } from 'react';
 import { Box, Paper, Typography } from '@mui/material';
+// Import the calculator (Make sure you created the file in Step 1)
+import { calculateSlotAvailability } from '../utils/availabilityCalculator';
 
 const ScheduleDayCell = memo(({
     day,
     requiredStations = [],
-    assignments = [],
+    assignments = [], // Local
     leaves = [],
     exclusions = [],
+
+    // Global Props for Calculator
+    allAssignments = [],
+    allExclusions = [],
+    allDays = [],
+    memberships = [],
+    isSelected, // 🟢 ADD THIS LINE HERE
     onInspect
 }) => {
     const isHoliday = day.is_holiday;
     const isLookback = day.is_lookback;
 
-
-    // 1. Memoized Styles: Only recalculates if status changes
+    // 1. Memoized Styles (Your original styles)
     const paperStyles = useMemo(() => {
+        // 1. SELECTION (Highest Priority)
+        // This ensures lookback days get the blue outline when clicked.
+        if (isSelected) {
+            return {
+                border: '2px solid #1976d2',
+                bgcolor: isLookback ? '#f0f7ff' : '#e3f2fd',
+                boxShadow: '0 0 8px rgba(25, 118, 210, 0.4)',
+                opacity: 1, // Remove the faded lookback effect when selected
+                filter: 'none', // Remove grayscale when selected
+                zIndex: 2,
+                transform: 'translateY(-2px)',
+            };
+        }
+
+        // 2. LOOKBACK (Original Style)
         if (isLookback) {
             return {
                 bgcolor: '#fcfcfc',
@@ -23,6 +46,8 @@ const ScheduleDayCell = memo(({
                 filter: 'grayscale(0.5)',
             };
         }
+
+        // 3. HOLIDAY (Original Style)
         if (isHoliday) {
             return {
                 boxShadow: '0 0 10px 2px rgba(25, 118, 210, 0.15)',
@@ -30,13 +55,14 @@ const ScheduleDayCell = memo(({
                 backgroundColor: '#f0f7ff'
             };
         }
+
+        // 4. DEFAULT (Original Style)
         return {
             bgcolor: 'background.paper',
             borderColor: '#e0e0e0'
         };
-    }, [isLookback, isHoliday]);
+    }, [isLookback, isHoliday, isSelected]);
 
-    // 2. Pre-extract day number from ISO string
     const dayNumber = useMemo(() => day.date.split('-')[2], [day.date]);
 
     return (
@@ -59,7 +85,7 @@ const ScheduleDayCell = memo(({
                 ...paperStyles
             }}
         >
-            {/* HEADER: Day Number & Availability Badge */}
+            {/* HEADER: Day Number */}
             <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={0.5}>
                 <Typography
                     sx={{
@@ -71,26 +97,40 @@ const ScheduleDayCell = memo(({
                 >
                     {dayNumber}
                 </Typography>
-
-                {!isLookback && (
-                    <Box sx={{
-                        bgcolor: '#e8f5e9',
-                        color: '#2e7d32',
-                        px: 0.6, py: 0.1, borderRadius: '6px',
-                        fontSize: '0.7rem', fontWeight: 800,
-                        border: '1px solid #81c784',
-                        lineHeight: 1
-                    }}>
-                        {day.availability_estimate}
-                    </Box>
-                )}
             </Box>
 
-            {/* MIDDLE: Station Rows */}
+            {/* MIDDLE: Station Rows (UPDATED LOGIC HERE) */}
             <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', gap: 0.6 }}>
                 {requiredStations.map(st => {
                     const assign = assignments.find(a => a.station_id === st.station_id);
                     const hasAssignment = !!assign?.assigned_person_name;
+
+                    // --- NEW CALCULATION LOGIC ---
+                    let displayValue = "-";
+                    let availScore = 0;
+
+                    if (hasAssignment) {
+                        displayValue = assign.assigned_person_name.split(' ')[0];
+                    } else if (!isLookback) {
+                        // Calculate Estimate dynamically
+                        availScore = calculateSlotAvailability(
+                            st.station_id, day, allDays, memberships, allAssignments, allExclusions, requiredStations
+                        );
+                        displayValue = `${availScore.toFixed(1)}`;
+                    }
+
+                    // Dynamic Color for Estimate
+                    let boxColor = '#e8f5e9'; // Default Green background
+                    let textColor = '#2e7d32'; // Default Green text
+                    let borderColor = '#c8e6c9';
+
+                    if (!hasAssignment && !isLookback) {
+                        if (availScore <= 0.5) {
+                            boxColor = '#ffebee'; textColor = '#c62828'; borderColor = '#ef9a9a'; // Red
+                        } else if (availScore < 1.5) {
+                            boxColor = '#fff3e0'; textColor = '#ef6c00'; borderColor = '#ffcc80'; // Orange
+                        }
+                    }
 
                     return (
                         <Box
@@ -117,17 +157,14 @@ const ScheduleDayCell = memo(({
                             </Typography>
 
                             <Box sx={{
-                                bgcolor: isLookback ? '#f5f5f5' : (hasAssignment ? '#e3f2fd' : '#e8f5e9'),
-                                color: isLookback ? '#9e9e9e' : (hasAssignment ? '#1565c0' : '#2e7d32'),
+                                bgcolor: isLookback ? '#f5f5f5' : (hasAssignment ? '#e3f2fd' : boxColor),
+                                color: isLookback ? '#9e9e9e' : (hasAssignment ? '#1565c0' : textColor),
                                 border: '1px solid',
-                                borderColor: isLookback ? '#e0e0e0' : (hasAssignment ? '#bbdefb' : '#c8e6c9'),
+                                borderColor: isLookback ? '#e0e0e0' : (hasAssignment ? '#bbdefb' : borderColor),
                                 borderRadius: '4px', px: 0.8, py: 0.1, minWidth: '45px', textAlign: 'right', display: 'flex', justifyContent: 'center'
                             }}>
                                 <Typography sx={{ fontSize: '0.65rem', fontWeight: 700, lineHeight: 1.2 }}>
-                                    {hasAssignment
-                                        ? assign.assigned_person_name.split(' ')[0]
-                                        : (isLookback ? '-' : (assign?.availability_estimate ?? day.availability_estimate))
-                                    }
+                                    {displayValue}
                                 </Typography>
                             </Box>
                         </Box>
@@ -135,7 +172,7 @@ const ScheduleDayCell = memo(({
                 })}
             </Box>
 
-            {/* LEAVE/EXCLUSION FOOTER */}
+            {/* LEAVE FOOTER (Preserved) */}
             <Box sx={{ mt: 1, mb: 1, minHeight: '20px' }}>
                 {leaves.length > 0 && (
                     <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 0.5 }}>
@@ -154,13 +191,14 @@ const ScheduleDayCell = memo(({
                     </Box>
                 )}
             </Box>
-            {/* NEW EXCLUSION SECTION */}
+
+            {/* EXCLUSION FOOTER (Preserved) */}
             {exclusions.length > 0 && (
                 <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 0.5 }}>
                     <Typography sx={{ fontSize: '0.55rem', fontWeight: 900, color: 'text.disabled' }}>EX:</Typography>
                     {exclusions.map((ex, i) => (
                         <Box key={i} sx={{
-                            bgcolor: isLookback ? '#f5f5f5' : '#f5f5f5', // Neutral Grey
+                            bgcolor: isLookback ? '#f5f5f5' : '#f5f5f5',
                             color: '#616161',
                             border: '1px solid #e0e0e0',
                             borderRadius: '4px', px: 0.5, py: 0.1, fontSize: '0.55rem', fontWeight: 'bold'
@@ -170,7 +208,8 @@ const ScheduleDayCell = memo(({
                     ))}
                 </Box>
             )}
-            {/* FOOTER: Fixed Layout */}
+
+            {/* FIXED FOOTER (Preserved) */}
             <Box sx={{ borderTop: '1px solid #eee', pt: 0.5, mt: 'auto', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
                 <Typography variant="caption" sx={{
                     fontSize: '0.6rem',
