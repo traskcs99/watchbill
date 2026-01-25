@@ -9,6 +9,7 @@ from ..models import (
 )
 from ..utils.schedule_utils import generate_schedule_days, populate_holiday_table
 from ..utils.schedule_summary_util import get_schedule_summary_data
+from ..utils.quota_calculator import calculate_schedule_quotas
 from datetime import datetime, date
 
 schedule_bp = Blueprint("schedules", __name__)
@@ -123,3 +124,14 @@ def get_schedule_summary(id):
         return jsonify({"error": "Schedule not found"}), 404
 
     return jsonify(summary), 200
+
+
+@schedule_bp.route("/schedules/<int:schedule_id>/quotas", methods=["GET"])
+def get_schedule_quotas(schedule_id):
+    try:
+        quotas = calculate_schedule_quotas(schedule_id)
+        return jsonify(quotas), 200
+    except Exception as e:
+        # Log the error so you can see it in pytest -s
+        print(f"Quota Route Error: {e}")
+        return jsonify({"error": str(e)}), 500

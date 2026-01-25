@@ -2,21 +2,29 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import {
     Box, Typography, Breadcrumbs, Link, Paper,
-    CircularProgress, Button, Divider, Dialog, DialogTitle,
-    DialogContent, List, ListItem, ListItemText, Tabs, Tab
+    CircularProgress, Tabs, Tab
 } from '@mui/material';
 import NavigateNextIcon from '@mui/icons-material/NavigateNext';
 import SettingsIcon from '@mui/icons-material/Settings';
 import AssignmentIcon from '@mui/icons-material/Assignment';
+import BarChartIcon from '@mui/icons-material/BarChart';
 
 // Sub-Components
 import ScheduleCalendar from '../components/ScheduleCalendar';
 import ConfigurationTab from '../components/ConfigurationTab';
-import WeightDistributionDialog from '../components/WeightDistributionDialog';
-// NOTE: Make sure to import your new LeaveManagerDialog here once created
-import LeaveManagerDialog from '../components/LeaveManagerDialog';
-import ScheduleDayCell from '../components/ScheduleDayCell'; // Ensure this is imported if used directly (or via Calendar)
 import DayDetailView from '../components/DayDetailView';
+import WorkloadTab from '../components/WorkloadTab';
+import WeightDistributionDialog from '../components/WeightDistributionDialog';
+import LeaveManagerDialog from '../components/LeaveManagerDialog';
+
+// Helper for Accessibility Props
+function a11yProps(index) {
+    return {
+        id: `simple-tab-${index}`,
+        'aria-controls': `simple-tabpanel-${index}`,
+    };
+}
+
 export default function ScheduleWorkspace() {
     const { scheduleId } = useParams();
 
@@ -43,8 +51,7 @@ export default function ScheduleWorkspace() {
     const [allLeaves, setAllLeaves] = useState([]);
     const [exclusions, setExclusions] = useState([]);
 
-    // 🟢 OPTIMIZATION 1: Memoize the selection handler
-    // This prevents all 34 calendar cells from re-rendering when you click around
+    // Memoize selection
     const handleSelectDay = useCallback((day) => {
         setSelectedDay(day);
     }, []);
@@ -77,11 +84,6 @@ export default function ScheduleWorkspace() {
     }, [scheduleId]);
 
     useEffect(() => { fetchData(); }, [fetchData]);
-
-    // 🟢 OPTIMIZATION 2: Clear selected day efficiently
-    const handleClearSelection = useCallback(() => {
-        setSelectedDay(null);
-    }, []);
 
     useEffect(() => {
         if (selectedDay) setActiveTab(0);
@@ -127,7 +129,6 @@ export default function ScheduleWorkspace() {
     const handleOpenWeightSlider = (mem) => {
         if (!mem) return;
         setEditingMember(mem);
-        // Pre-calc logic moved to Dialog, but we set state here to trigger mount
         setWeightDialogOpen(true);
     };
 
@@ -147,7 +148,6 @@ export default function ScheduleWorkspace() {
         if (res.ok) fetchData();
     };
     const handleOpenLeaveDialog = (mem) => {
-        console.log("Attempting to open leave for:", mem.person_name);
         setActiveLeaveMember(mem);
         setLeaveDialogOpen(true);
     };
@@ -163,10 +163,9 @@ export default function ScheduleWorkspace() {
                     reason: formData.reason
                 })
             });
-
             if (res.ok) {
                 setLeaveDialogOpen(false);
-                fetchData(); // This refreshes the personnel pool to show the new pills
+                fetchData();
             } else {
                 const err = await res.json();
                 alert(`Error: ${err.error}`);
@@ -175,9 +174,8 @@ export default function ScheduleWorkspace() {
             console.error("Failed to save leave:", err);
         }
     };
-    // --- DAY DETAIL HANDLERS ---
 
-    // 1. Update Name, Holiday, or Weight
+    // Day Detail Handlers
     const handleUpdateDay = useCallback(async (dayId, updates) => {
         try {
             const res = await fetch(`/api/schedule-days/${dayId}`, {
@@ -186,49 +184,34 @@ export default function ScheduleWorkspace() {
                 body: JSON.stringify(updates)
             });
             if (res.ok) {
-                // Update local state so the calendar and sidebar reflect the change
                 setDays(prev => prev.map(d => d.id === dayId ? { ...d, ...updates } : d));
                 setSelectedDay(prev => prev?.id === dayId ? { ...prev, ...updates } : prev);
             }
-        } catch (err) {
-            console.error("Failed to update day:", err);
-        }
+        } catch (err) { console.error(err); }
     }, []);
 
-    // 2. Assign a person to a station
     const handleAssign = useCallback(async (dayId, stationId, membershipId) => {
-        // 1. Find the assignment record for this specific day/station to get its ID
         const targetAssignment = assignments.find(
             a => a.day_id === dayId && a.station_id === stationId
         );
-
-        if (!targetAssignment) {
-            console.error("No assignment slot found for this day/station");
-            return;
-        }
+        if (!targetAssignment) return;
 
         try {
-            // 2. Use your existing PATCH route with the assignment ID
             const res = await fetch(`/api/assignments/${targetAssignment.id}`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     membership_id: membershipId || null,
-                    is_locked: true // Lock it since a human made this choice
+                    is_locked: true
                 })
             });
-
             if (res.ok) {
-                // 3. Refresh assignments so the UI updates
                 const assignmentsRes = await fetch(`/api/schedules/${scheduleId}/assignments`).then(r => r.json());
                 setAssignments(assignmentsRes);
             }
-        } catch (err) {
-            console.error("Failed to patch assignment:", err);
-        }
+        } catch (err) { console.error(err); }
     }, [assignments, scheduleId]);
 
-    // 3. Toggle manual exclusions
     const handleToggleExclusion = useCallback(async (dayId, membershipId) => {
         try {
             const res = await fetch(`/api/exclusions/toggle`, {
@@ -237,46 +220,63 @@ export default function ScheduleWorkspace() {
                 body: JSON.stringify({ day_id: dayId, membership_id: membershipId })
             });
             if (res.ok) {
-                // Refresh exclusions to update the checkboxes
                 const exclusionsRes = await fetch(`/api/exclusions/schedule/${scheduleId}`).then(r => r.json());
                 setExclusions(exclusionsRes);
             }
-        } catch (err) {
-            console.error("Failed to toggle exclusion:", err);
-        }
+        } catch (err) { console.error(err); }
     }, [scheduleId]);
 
     if (loading) return <Box p={5} textAlign="center"><CircularProgress /></Box>;
     if (!schedule) return <Typography p={5}>Schedule not found.</Typography>;
 
     return (
-        <Box sx={{ p: 3, bgcolor: '#f4f6f8', minHeight: '100vh' }}>
-            <Breadcrumbs separator={<NavigateNextIcon fontSize="small" />} sx={{ mb: 3 }}>
+        // 🟢 1. Reduced Padding (p: 1) so it goes near the edge
+        <Box sx={{ p: 1, bgcolor: '#f4f6f8', height: '100vh', display: 'flex', flexDirection: 'column' }}>
+            {/* HEADER AREA */}
+            <Breadcrumbs separator={<NavigateNextIcon fontSize="small" />} sx={{ mb: 1, px: 1 }}>
                 <Link underline="hover" color="inherit" href="/">Schedules</Link>
                 <Typography color="text.primary" fontWeight="bold">{schedule.name}</Typography>
             </Breadcrumbs>
 
-            <Box sx={{ display: 'flex', gap: 2, height: '82vh' }}>
-                {/* 1. CALENDAR COMPONENT */}
-                <ScheduleCalendar
-                    days={days}
-                    selectedDayId={selectedDay?.id}                    // 🟢 Passing the memoized handler here
-                    onSelectDay={handleSelectDay}
-                    assignments={assignments}
-                    leaves={allLeaves}
-                    exclusions={exclusions}
-                    memberships={schedule.memberships}
-                    requiredStations={schedule?.required_stations || []}
-                />
+            {/* MAIN LAYOUT AREA */}
+            <Box sx={{ display: 'flex', gap: 1, flexGrow: 1, overflow: 'hidden' }}>
 
-                {/* 2. SIDEBAR TABS */}
-                <Paper sx={{ flex: 1.2, display: 'flex', flexDirection: 'column', borderRadius: 2, overflow: 'hidden' }}>
-                    <Tabs value={activeTab} onChange={handleTabChange} variant="fullWidth" sx={{ borderBottom: 1, borderColor: 'divider' }}>
-                        <Tab icon={<AssignmentIcon fontSize="small" />} label="Operations" />
-                        <Tab icon={<SettingsIcon fontSize="small" />} label="Configure" />
+                {/* 2. CALENDAR (Flex: 3 = 75% Width) */}
+                <Box sx={{ flex: 3, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                    <ScheduleCalendar
+                        days={days}
+                        selectedDayId={selectedDay?.id}
+                        onSelectDay={handleSelectDay}
+                        assignments={assignments}
+                        leaves={allLeaves}
+                        exclusions={exclusions}
+                        memberships={schedule.memberships}
+                        requiredStations={schedule?.required_stations || []}
+                    />
+                </Box>
+
+                {/* 3. SIDEBAR (Flex: 1 = 25% Width - Balanced) */}
+                <Paper sx={{
+                    flex: 1,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    borderRadius: 2,
+                    overflow: 'hidden',
+                    border: '1px solid #e0e0e0',
+                    minWidth: 350 // Prevent it from getting too squashed
+                }}>
+                    <Tabs
+                        value={activeTab}
+                        onChange={handleTabChange}
+                        variant="fullWidth"
+                        sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'white', minHeight: '60px' }}
+                    >
+                        <Tab icon={<AssignmentIcon fontSize="small" />} label="Ops" {...a11yProps(0)} />
+                        <Tab icon={<SettingsIcon fontSize="small" />} label="Config" {...a11yProps(1)} />
+                        <Tab icon={<BarChartIcon fontSize="small" />} label="Workload" {...a11yProps(2)} />
                     </Tabs>
 
-                    <Box sx={{ p: 2, flexGrow: 1, overflowY: 'auto' }}>
+                    <Box sx={{ p: 2, flexGrow: 1, overflowY: 'auto', bgcolor: '#fafafa' }}>
                         {activeTab === 0 && (
                             <DayDetailView
                                 day={selectedDay}
@@ -305,11 +305,36 @@ export default function ScheduleWorkspace() {
                                 onDeleteLeave={handleDeleteLeave}
                             />
                         )}
+
+                        {activeTab === 2 && (
+                            <WorkloadTab
+                                scheduleId={scheduleId}
+                                memberships={schedule.memberships || []}
+                                assignments={assignments}
+                                days={days}
+                                stations={schedule.required_stations || []}
+                            />
+                        )}
                     </Box>
                 </Paper>
             </Box>
 
-            {/* ... Dialogs stay the same ... */}
+            {/* Dialogs */}
+            <WeightDistributionDialog
+                open={weightDialogOpen}
+                onClose={() => setWeightDialogOpen(false)}
+                membership={editingMember}
+                scheduleId={scheduleId}
+                onSave={handleSaveWeights}
+            />
+            <LeaveManagerDialog
+                open={leaveDialogOpen}
+                onClose={() => setLeaveDialogOpen(false)}
+                member={activeLeaveMember}
+                onSave={handleSaveLeave}
+            />
+
+            {/* ... Other Dialogs ... */}
         </Box>
     );
 }
