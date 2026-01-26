@@ -9,6 +9,7 @@ import SettingsIcon from '@mui/icons-material/Settings';
 import AssignmentIcon from '@mui/icons-material/Assignment';
 import BarChartIcon from '@mui/icons-material/BarChart';
 
+
 // Sub-Components
 import ScheduleCalendar from '../components/ScheduleCalendar';
 import ConfigurationTab from '../components/ConfigurationTab';
@@ -17,7 +18,7 @@ import WorkloadTab from '../components/WorkloadTab';
 import WeightDistributionDialog from '../components/WeightDistributionDialog';
 import LeaveManagerDialog from '../components/LeaveManagerDialog';
 import AlertsList from '../components/AlertsList';
-import MemberConfigDialog from '../components/MemberConfigDialog'; // 🟢 1. IMPORT THIS
+import MemberConfigDialog from '../components/MemberConfigDialog';
 
 // Helper for Accessibility Props
 function a11yProps(index) {
@@ -37,6 +38,7 @@ export default function ScheduleWorkspace() {
     const [loading, setLoading] = useState(true);
     const [masterStations, setMasterStations] = useState([]);
     const [allPersonnel, setAllPersonnel] = useState([]);
+    const [allGroups, setAllGroups] = useState([]); // 🟢 Added Group State
 
     const [selectedDay, setSelectedDay] = useState(null);
     const [activeTab, setActiveTab] = useState(0);
@@ -48,8 +50,6 @@ export default function ScheduleWorkspace() {
     const [editingMember, setEditingMember] = useState(null);
     const [leaveDialogOpen, setLeaveDialogOpen] = useState(false);
     const [activeLeaveMember, setActiveLeaveMember] = useState(null);
-
-    // 🟢 2. NEW CONFIG DIALOG STATE
     const [configDialogOpen, setConfigDialogOpen] = useState(false);
     const [activeConfigMember, setActiveConfigMember] = useState(null);
 
@@ -57,10 +57,39 @@ export default function ScheduleWorkspace() {
     const [allLeaves, setAllLeaves] = useState([]);
     const [exclusions, setExclusions] = useState([]);
     const [alerts, setAlerts] = useState([]);
-
     const [highlightedMemberId, setHighlightedMemberId] = useState(null);
 
-    // 🟢 HELPER: Fast refresh of operational data
+    // 🟢 DATA FETCHING
+    const fetchData = useCallback(async () => {
+        setLoading(true);
+        try {
+            const [schData, masterRes, peopleRes, assignmentsRes, exclusionsRes, alertsRes, groupsRes] = await Promise.all([
+                fetch(`/api/schedules/${scheduleId}`).then(res => res.json()),
+                fetch('/api/master-stations').then(res => res.json()),
+                fetch('/api/personnel').then(res => res.json()),
+                fetch(`/api/schedules/${scheduleId}/assignments`).then(res => res.ok ? res.json() : []),
+                fetch(`/api/exclusions/schedule/${scheduleId}`).then(res => res.ok ? res.json() : []),
+                fetch(`/api/schedules/${scheduleId}/alerts`).then(res => res.ok ? res.json() : []),
+                fetch('/api/groups').then(res => res.json()) // 🟢 Added Group Fetch
+            ]);
+
+            setSchedule(schData);
+            setSummary(schData);
+            setDays(schData.days || []);
+            setAllLeaves(schData.leaves_exploded || []);
+            setMasterStations(masterRes);
+            setAllPersonnel(peopleRes);
+            setAssignments(assignmentsRes);
+            setExclusions(exclusionsRes);
+            setAlerts(alertsRes);
+            setAllGroups(groupsRes); // 🟢 Set Group State
+            setLoading(false);
+        } catch (err) {
+            console.error("Error loading workspace:", err);
+            setLoading(false);
+        }
+    }, [scheduleId]);
+
     const refreshOperationalData = useCallback(async () => {
         try {
             const [assignmentsRes, exclusionsRes, alertsRes, schRes] = await Promise.all([
@@ -82,101 +111,66 @@ export default function ScheduleWorkspace() {
         }
     }, [scheduleId]);
 
-    // Memoize selection
-    const handleSelectDay = useCallback((day) => {
-        setSelectedDay(day);
-    }, []);
-
-    const fetchData = useCallback(async () => {
-        setLoading(true);
-        try {
-            const [schData, masterRes, peopleRes, assignmentsRes, exclusionsRes, alertsRes] = await Promise.all([
-                fetch(`/api/schedules/${scheduleId}`).then(res => res.json()),
-                fetch('/api/master-stations').then(res => res.json()),
-                fetch('/api/personnel').then(res => res.json()),
-                fetch(`/api/schedules/${scheduleId}/assignments`).then(res => res.ok ? res.json() : []),
-                fetch(`/api/exclusions/schedule/${scheduleId}`).then(res => res.ok ? res.json() : []),
-                fetch(`/api/schedules/${scheduleId}/alerts`).then(res => res.ok ? res.json() : [])
-            ]);
-
-            setSchedule(schData);
-            setSummary(schData);
-            setDays(schData.days || []);
-            setAllLeaves(schData.leaves_exploded || []);
-            setMasterStations(masterRes);
-            setAllPersonnel(peopleRes);
-            setAssignments(assignmentsRes);
-            setExclusions(exclusionsRes);
-            setAlerts(alertsRes);
-            setLoading(false);
-        } catch (err) {
-            console.error("Error loading workspace:", err);
-            setLoading(false);
-        }
-    }, [scheduleId]);
-
     useEffect(() => { fetchData(); }, [fetchData]);
 
-    useEffect(() => {
-        if (selectedDay) setActiveTab(0);
-    }, [selectedDay]);
+    // 🟢 AI OPTIMIZATION HANDLER
+    const handleSaveOptimizationSettings = async (configPayload) => {
+        try {
+            const res = await fetch(`/api/schedules/${scheduleId}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(configPayload)
+            });
 
-    const handleTabChange = useCallback((_, newValue) => {
-        setActiveTab(newValue);
-    }, []);
+            if (res.ok) {
+                fetchData(); // Reload to sync weight data
+                console.log("Optimization settings saved!");
+            }
+        } catch (err) {
+            console.error("Error saving optimization settings:", err);
+        }
+    };
 
-    // ... Handlers ...
+    // -- OTHER HANDLERS --
+    const handleTabChange = useCallback((_, newValue) => setActiveTab(newValue), []);
+    const handleSelectDay = useCallback((day) => setSelectedDay(day), []);
+
     const handleAddStation = async (stationId) => {
         const res = await fetch(`/api/schedules/${scheduleId}/stations`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ station_id: stationId }) });
         if (res.ok) { setIsStationDialogOpen(false); fetchData(); }
     };
+
     const handleRemoveStation = async (id) => { if (window.confirm("Remove?")) { await fetch(`/api/schedules/${scheduleId}/stations/${id}`, { method: 'DELETE' }); fetchData(); } };
+
     const handleAddMember = async (pid) => { const res = await fetch('/api/schedule-memberships', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ schedule_id: parseInt(scheduleId), person_id: pid }) }); if (res.ok) { setIsMemberDialogOpen(false); fetchData(); } };
+
     const handleRemoveMember = async (id) => { if (window.confirm("Remove?")) { await fetch(`/api/schedule-memberships/${id}`, { method: 'DELETE' }); fetchData(); } };
 
-    // Weight Logic
     const handleOpenWeightSlider = (mem) => { if (!mem) return; setEditingMember(mem); setWeightDialogOpen(true); };
+
     const handleSaveWeights = async (membershipId, weights) => {
         const res = await fetch(`/api/schedule-memberships/${membershipId}/weights/distribute`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ weights }) });
         if (res.ok) { setWeightDialogOpen(false); fetchData(); }
     };
 
-    // 🟢 3. NEW MEMBER CONFIG HANDLERS (Missing in your file)
-    const handleOpenMemberConfig = (member) => {
-        setActiveConfigMember(member);
-        setConfigDialogOpen(true);
-    };
+    const handleOpenMemberConfig = (member) => { setActiveConfigMember(member); setConfigDialogOpen(true); };
 
     const handleSaveMemberConfig = async (membershipId, configData) => {
         try {
-            const res = await fetch(`/api/schedule-memberships/${membershipId}`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(configData)
-            });
-
-            if (res.ok) {
-                setConfigDialogOpen(false);
-                fetchData(); // Reload to see the changes applied
-            } else {
-                console.error("Failed to save config");
-            }
-        } catch (err) {
-            console.error("Error updating member config:", err);
-        }
-    };
-
-    // Leave Logic
-    const handleDeleteLeave = async (leaveId) => { if (!window.confirm("Remove leave?")) return; const res = await fetch(`/api/leaves/${leaveId}`, { method: 'DELETE' }); if (res.ok) refreshOperationalData(); };
-    const handleOpenLeaveDialog = (mem) => { setActiveLeaveMember(mem); setLeaveDialogOpen(true); };
-    const handleSaveLeave = async (membershipId, formData) => {
-        try {
-            const res = await fetch('/api/leaves', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ membership_id: membershipId, start_date: formData.start_date, end_date: formData.end_date, reason: formData.reason }) });
-            if (res.ok) { setLeaveDialogOpen(false); refreshOperationalData(); fetchData(); }
+            const res = await fetch(`/api/schedule-memberships/${membershipId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(configData) });
+            if (res.ok) { setConfigDialogOpen(false); fetchData(); }
         } catch (err) { console.error(err); }
     };
 
-    // Day Detail Handlers
+    const handleSaveLeave = async (membershipId, formData) => {
+        try {
+            const res = await fetch('/api/leaves', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ membership_id: membershipId, start_date: formData.start_date, end_date: formData.end_date, reason: formData.reason }) });
+            if (res.ok) { setLeaveDialogOpen(false); fetchData(); }
+        } catch (err) { console.error(err); }
+    };
+
+    const handleDeleteLeave = async (leaveId) => { if (!window.confirm("Remove leave?")) return; const res = await fetch(`/api/leaves/${leaveId}`, { method: 'DELETE' }); if (res.ok) fetchData(); };
+
     const handleUpdateDay = useCallback(async (dayId, updates) => {
         try {
             const res = await fetch(`/api/schedule-days/${dayId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updates) });
@@ -199,7 +193,10 @@ export default function ScheduleWorkspace() {
             if (res.ok) { refreshOperationalData(); }
         } catch (err) { console.error(err); }
     }, [refreshOperationalData]);
-
+    const handleOpenLeaveDialog = (mem) => {
+        setActiveLeaveMember(mem);
+        setLeaveDialogOpen(true);
+    };
     if (loading) return <Box p={5} textAlign="center"><CircularProgress /></Box>;
     if (!schedule) return <Typography p={5}>Schedule not found.</Typography>;
 
@@ -254,16 +251,17 @@ export default function ScheduleWorkspace() {
                         {activeTab === 1 && (
                             <ConfigurationTab
                                 summary={summary}
+                                groups={allGroups}
                                 masterStations={masterStations}
                                 onRemoveStation={handleRemoveStation}
-                                onAddStationClick={() => setIsStationDialogOpen(true)}
-                                onRemoveMember={handleRemoveMember}
+                                onAddStationClick={handleAddStation} onRemoveMember={handleRemoveMember}
                                 onAddMemberClick={() => setIsMemberDialogOpen(true)}
                                 onOpenWeightSlider={handleOpenWeightSlider}
                                 onOpenLeave={handleOpenLeaveDialog}
                                 onDeleteLeave={handleDeleteLeave}
-                                // 🟢 4. PASS THE HANDLER HERE
                                 onOpenMemberConfig={handleOpenMemberConfig}
+                                onSaveSettings={handleSaveOptimizationSettings}
+                                onRefresh={fetchData}
                             />
                         )}
                         {activeTab === 2 && (
@@ -285,14 +283,7 @@ export default function ScheduleWorkspace() {
             {/* Dialogs */}
             <WeightDistributionDialog open={weightDialogOpen} onClose={() => setWeightDialogOpen(false)} membership={editingMember} scheduleId={scheduleId} onSave={handleSaveWeights} />
             <LeaveManagerDialog open={leaveDialogOpen} onClose={() => setLeaveDialogOpen(false)} member={activeLeaveMember} onSave={handleSaveLeave} />
-
-            {/* 🟢 5. RENDER THE CONFIG DIALOG */}
-            <MemberConfigDialog
-                open={configDialogOpen}
-                onClose={() => setConfigDialogOpen(false)}
-                member={activeConfigMember}
-                onSave={handleSaveMemberConfig}
-            />
+            <MemberConfigDialog open={configDialogOpen} onClose={() => setConfigDialogOpen(false)} member={activeConfigMember} onSave={handleSaveMemberConfig} />
         </Box>
     );
 }

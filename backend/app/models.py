@@ -1,7 +1,16 @@
 from __future__ import annotations
 from datetime import date, timedelta, datetime
-from typing import Optional, List
-from sqlalchemy import String, Integer, Boolean, Date, ForeignKey, UniqueConstraint
+from typing import Optional, List, Dict, Any
+from sqlalchemy import (
+    String,
+    Integer,
+    Boolean,
+    Date,
+    ForeignKey,
+    UniqueConstraint,
+    Float,
+    DateTime,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .database import db, migrate
 from collections import defaultdict
@@ -146,6 +155,13 @@ class Schedule(db.Model):
     start_date: Mapped[date] = mapped_column(Date, nullable=False)
     end_date: Mapped[date] = mapped_column(Date, nullable=False)
     status: Mapped[str] = mapped_column(String(20), default="draft")
+    weight_quota_deviation: Mapped[float] = mapped_column(default=1.0)
+    weight_spacing_1_day: Mapped[float] = mapped_column(default=1.5)
+    weight_spacing_2_day: Mapped[float] = mapped_column(default=1.0)
+    weight_same_weekend: Mapped[float] = mapped_column(default=1.0)
+    weight_consecutive_weekends: Mapped[float] = mapped_column(default=1.5)
+    weight_goal_deviation: Mapped[float] = mapped_column(default=0.5)
+    group_weights: Mapped[Dict[str, Any]] = mapped_column(db.JSON, default={})
 
     # Cascades: If a Schedule is deleted, wipe all related child records
     memberships: Mapped[List["ScheduleMembership"]] = relationship(
@@ -161,6 +177,28 @@ class Schedule(db.Model):
     required_stations: Mapped[List["ScheduleStation"]] = relationship(
         back_populates="schedule", cascade="all, delete-orphan", lazy="joined"
     )
+    candidates: Mapped[List["ScheduleCandidate"]] = relationship(
+        back_populates="schedule", cascade="all, delete-orphan"
+    )
+
+    def _get_exploded_leaves(self):
+        exploded = []
+        for membership in self.memberships:
+            for leave in membership.leaves:
+                # Iterate from start_date to end_date
+                current = leave.start_date
+                while current <= leave.end_date:
+                    exploded.append(
+                        {
+                            "id": leave.id,
+                            "date": current.isoformat(),
+                            "membership_id": membership.id,
+                            "person_name": membership.person.name,  # or membership.person_name
+                            "reason": leave.reason,
+                        }
+                    )
+                    current += timedelta(days=1)
+        return exploded
 
     def _get_leaves_by_date(self):
         """Helper to create a map of date strings to lists of leave objects."""
@@ -192,6 +230,14 @@ class Schedule(db.Model):
             "status": self.status,
             "start_date": self.start_date.isoformat(),
             "end_date": self.end_date.isoformat(),
+            # GOAT POINTS / OPTIMIZATION WEIGHTS
+            "weight_quota_deviation": self.weight_quota_deviation,
+            "weight_spacing_1_day": self.weight_spacing_1_day,
+            "weight_spacing_2_day": self.weight_spacing_2_day,
+            "weight_same_weekend": self.weight_same_weekend,
+            "weight_consecutive_weekends": self.weight_consecutive_weekends,
+            "weight_goal_deviation": self.weight_goal_deviation,
+            "group_weights": self.group_weights,
         }
 
         if not summary_only:
@@ -203,6 +249,7 @@ class Schedule(db.Model):
             ]
             data["memberships"] = [m.to_dict() for m in self.memberships]
             data["required_stations"] = [rs.to_dict() for rs in self.required_stations]
+            data["leaves_exploded"] = self._get_exploded_leaves()
 
         return data
 
@@ -513,4 +560,34 @@ class ScheduleStation(db.Model):
             "station_id": self.station_id,
             "name": self.master_station.name if self.master_station else None,
             "abbr": self.master_station.abbr if self.master_station else None,
+        }
+
+
+class ScheduleCandidate(db.Model):
+    __tablename__ = "schedule_candidates"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    schedule_id: Mapped[int] = mapped_column(
+        ForeignKey("schedules.id", ondelete="CASCADE"), nullable=False
+    )
+
+    run_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    score: Mapped[float] = mapped_column(Float, nullable=False)
+
+    # Storage for solution and metrics
+    assignments_data: Mapped[Dict[str, Any]] = mapped_column(db.JSON, nullable=False)
+    metrics_data: Mapped[Dict[str, Any]] = mapped_column(db.JSON, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    schedule: Mapped["Schedule"] = relationship(back_populates="candidates")
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "run_id": self.run_id,
+            "score": self.score,
+            "assignments_data": self.assignments_data,
+            "metrics_data": self.metrics_data,
+            "created_at": self.created_at.isoformat(),
         }

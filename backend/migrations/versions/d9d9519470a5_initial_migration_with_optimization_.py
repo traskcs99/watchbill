@@ -1,8 +1,8 @@
-"""initial migration
+"""Initial migration with optimization engine
 
-Revision ID: 056572c12b4f
+Revision ID: d9d9519470a5
 Revises: 
-Create Date: 2026-01-19 12:25:28.315785
+Create Date: 2026-01-25 18:59:34.471709
 
 """
 from alembic import op
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision = '056572c12b4f'
+revision = 'd9d9519470a5'
 down_revision = None
 branch_labels = None
 depends_on = None
@@ -49,6 +49,13 @@ def upgrade():
     sa.Column('start_date', sa.Date(), nullable=False),
     sa.Column('end_date', sa.Date(), nullable=False),
     sa.Column('status', sa.String(length=20), nullable=False),
+    sa.Column('weight_quota_deviation', sa.Float(), nullable=False),
+    sa.Column('weight_spacing_1_day', sa.Float(), nullable=False),
+    sa.Column('weight_spacing_2_day', sa.Float(), nullable=False),
+    sa.Column('weight_same_weekend', sa.Float(), nullable=False),
+    sa.Column('weight_consecutive_weekends', sa.Float(), nullable=False),
+    sa.Column('weight_goal_deviation', sa.Float(), nullable=False),
+    sa.Column('group_weights', sa.JSON(), nullable=False),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_table('personnel',
@@ -57,6 +64,17 @@ def upgrade():
     sa.Column('is_active', sa.Boolean(), nullable=False),
     sa.Column('group_id', sa.Integer(), nullable=True),
     sa.ForeignKeyConstraint(['group_id'], ['groups.id'], ondelete='SET NULL'),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_table('schedule_candidates',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('schedule_id', sa.Integer(), nullable=False),
+    sa.Column('run_id', sa.String(length=36), nullable=False),
+    sa.Column('score', sa.Float(), nullable=False),
+    sa.Column('assignments_data', sa.JSON(), nullable=False),
+    sa.Column('metrics_data', sa.JSON(), nullable=True),
+    sa.Column('created_at', sa.DateTime(), nullable=False),
+    sa.ForeignKeyConstraint(['schedule_id'], ['schedules.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_table('schedule_days',
@@ -160,6 +178,7 @@ def downgrade():
     op.drop_table('qualifications')
     op.drop_table('schedule_stations')
     op.drop_table('schedule_days')
+    op.drop_table('schedule_candidates')
     op.drop_table('personnel')
     op.drop_table('schedules')
     op.drop_table('master_stations')

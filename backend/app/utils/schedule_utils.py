@@ -179,4 +179,5 @@ def generate_assignments_for_station(db_session, schedule, master_station_id):
         )
 
     db_session.add_all(new_slots)
+    db_session.flush()
     return len(new_slots)

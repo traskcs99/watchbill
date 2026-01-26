@@ -149,3 +149,36 @@ def get_schedule_alerts(schedule_id):
     except Exception as e:
         print(f"Validator Error: {e}")
         return jsonify({"error": str(e)}), 500
+
+
+@schedule_bp.route("/schedules/<int:id>", methods=["PATCH"])
+def update_schedule(id):
+    schedule = db.session.get(Schedule, id)
+    if not schedule:
+        return jsonify({"error": "Schedule not found"}), 404
+
+    data = request.json
+
+    # Standard Fields
+    if "name" in data:
+        schedule.name = data["name"]
+    if "status" in data:
+        schedule.status = data["status"]
+
+    # Optimization / Goat Points Weights
+    optimization_keys = [
+        "weight_quota_deviation",
+        "weight_spacing_1_day",
+        "weight_spacing_2_day",
+        "weight_same_weekend",
+        "weight_consecutive_weekends",
+        "weight_goal_deviation",
+    ]
+
+    for key in optimization_keys:
+        if key in data:
+            if isinstance(data[key], (int, float)):
+                setattr(schedule, key, float(data[key]))
+
+    db.session.commit()
+    return jsonify(schedule.to_dict(summary_only=False))
