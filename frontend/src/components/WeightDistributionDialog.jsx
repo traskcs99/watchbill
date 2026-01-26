@@ -67,10 +67,12 @@ export default function WeightDistributionDialog({
 
     return (
         <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth>
-            <DialogTitle>
-                Weight Distribution
+            <DialogTitle component="div">
+                <Typography variant="h6" component="div">
+                    Weight Distribution
+                </Typography>
                 <Typography variant="subtitle2" color="text.secondary" component="div">
-                    {member.person_name}
+                    {member?.person_name}
                 </Typography>
             </DialogTitle>
 
@@ -115,6 +117,6 @@ export default function WeightDistributionDialog({
                     Save Changes
                 </Button>
             </DialogActions>
-        </Dialog>
+        </Dialog >
     );
 }

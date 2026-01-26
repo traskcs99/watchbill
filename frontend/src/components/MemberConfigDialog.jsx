@@ -36,7 +36,7 @@ export default function MemberConfigDialog({ open, onClose, member, onSave }) {
         <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth>
             <DialogTitle>
                 Member Settings
-                <Typography variant="subtitle2" color="text.secondary">
+                <Typography variant="subtitle2" color="text.secondary" component="div">
                     {member?.person_name}
                 </Typography>
             </DialogTitle>

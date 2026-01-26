@@ -19,7 +19,7 @@ import WeightDistributionDialog from '../components/WeightDistributionDialog';
 import LeaveManagerDialog from '../components/LeaveManagerDialog';
 import AlertsList from '../components/AlertsList';
 import MemberConfigDialog from '../components/MemberConfigDialog';
-
+import MemberPickerDialog from '../components/MemberPickerDialog';
 // Helper for Accessibility Props
 function a11yProps(index) {
     return {
@@ -114,20 +114,25 @@ export default function ScheduleWorkspace() {
     useEffect(() => { fetchData(); }, [fetchData]);
 
     // 🟢 AI OPTIMIZATION HANDLER
-    const handleSaveOptimizationSettings = async (configPayload) => {
+    const handleSaveOptimizationSettings = async (payload) => {
         try {
-            const res = await fetch(`/api/schedules/${scheduleId}`, {
+            // 1. Send the PATCH request
+            const response = await fetch(`/api/schedules/${scheduleId}`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(configPayload)
+                body: JSON.stringify(payload) // Payload should be { weight_quota_deviation, group_weights, etc. }
             });
 
-            if (res.ok) {
-                fetchData(); // Reload to sync weight data
-                console.log("Optimization settings saved!");
-            }
+            if (!response.ok) throw new Error("Failed to update database");
+
+            const updatedSchedule = await response.json();
+
+            // 2. IMPORTANT: Update the local state with what the DB just sent back
+            setSchedule(updatedSchedule);
+
+            console.log("Database updated successfully:", updatedSchedule.group_weights);
         } catch (err) {
-            console.error("Error saving optimization settings:", err);
+            console.error("Save Error:", err);
         }
     };
 
@@ -146,8 +151,17 @@ export default function ScheduleWorkspace() {
 
     const handleRemoveMember = async (id) => { if (window.confirm("Remove?")) { await fetch(`/api/schedule-memberships/${id}`, { method: 'DELETE' }); fetchData(); } };
 
-    const handleOpenWeightSlider = (mem) => { if (!mem) return; setEditingMember(mem); setWeightDialogOpen(true); };
+    const handleOpenWeightSlider = (mem) => {
+        if (!mem) return;
+        console.log("Parent Workspace: Opening slider for", mem.person_name);
 
+        // Set to null first, then set the member to trigger a clean mount
+        setEditingMember(null);
+        setTimeout(() => {
+            setEditingMember(mem);
+            setWeightDialogOpen(true);
+        }, 10);
+    };
     const handleSaveWeights = async (membershipId, weights) => {
         const res = await fetch(`/api/schedule-memberships/${membershipId}/weights/distribute`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ weights }) });
         if (res.ok) { setWeightDialogOpen(false); fetchData(); }
@@ -251,10 +265,12 @@ export default function ScheduleWorkspace() {
                         {activeTab === 1 && (
                             <ConfigurationTab
                                 summary={summary}
+                                schedule={schedule}
                                 groups={allGroups}
                                 masterStations={masterStations}
                                 onRemoveStation={handleRemoveStation}
-                                onAddStationClick={handleAddStation} onRemoveMember={handleRemoveMember}
+                                onAddStationClick={handleAddStation}
+                                onRemoveMember={handleRemoveMember}
                                 onAddMemberClick={() => setIsMemberDialogOpen(true)}
                                 onOpenWeightSlider={handleOpenWeightSlider}
                                 onOpenLeave={handleOpenLeaveDialog}
@@ -281,9 +297,30 @@ export default function ScheduleWorkspace() {
             </Box>
 
             {/* Dialogs */}
-            <WeightDistributionDialog open={weightDialogOpen} onClose={() => setWeightDialogOpen(false)} membership={editingMember} scheduleId={scheduleId} onSave={handleSaveWeights} />
+            {/* ScheduleWorkspace.jsx bottom */}
+            <WeightDistributionDialog
+                open={weightDialogOpen}
+                onClose={() => setWeightDialogOpen(false)}
+
+                // 🟢 CHANGE THIS: prop name must match the dialog's definition
+                member={editingMember}
+
+                // 🟢 ADD THIS: The dialog needs masterStations to show names
+                masterStations={masterStations}
+
+                scheduleId={scheduleId}
+                onSave={handleSaveWeights}
+            />
             <LeaveManagerDialog open={leaveDialogOpen} onClose={() => setLeaveDialogOpen(false)} member={activeLeaveMember} onSave={handleSaveLeave} />
             <MemberConfigDialog open={configDialogOpen} onClose={() => setConfigDialogOpen(false)} member={activeConfigMember} onSave={handleSaveMemberConfig} />
+            {/* 🟢 ADD THIS MISSING DIALOG HERE */}
+            <MemberPickerDialog
+                open={isMemberDialogOpen}
+                onClose={() => setIsMemberDialogOpen(false)}
+                personnel={allPersonnel}      // Provided by your fetchData
+                onAdd={handleAddMember}      // Your existing API handler
+                existingMembers={schedule.memberships || []} // Filters out duplicates
+            />
         </Box>
     );
 }

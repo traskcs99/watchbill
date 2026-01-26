@@ -137,25 +137,33 @@ export default function PersonnelListItem({
                         {/* Qualifications & Weights */}
                         <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 1 }}>
                             {member.station_weights.map(sw => {
-                                const station = masterStations.find(ms => ms.id === sw.station_id);
+                                const station = masterStations.find(ms => Number(ms.id) === Number(sw.station_id));
                                 return (
                                     <Chip
                                         key={sw.id}
                                         label={`${station?.abbr || '??'}: ${Math.round(sw.weight * 100)}%`}
                                         color="primary" size="small"
-                                        onClick={() => onOpenWeight(member)}
+                                        onClick={() => {
+                                            console.log("Opening weight for member:", member.id);
+                                            onOpenWeight(member);
+                                        }}
                                         sx={{ height: 20, fontSize: '0.65rem', cursor: 'pointer' }}
                                     />
                                 );
                             })}
                             {member.qualifications
-                                ?.filter(qId => !member.station_weights.some(sw => sw.station_id === qId))
+                                ?.filter(qId => {
+                                    return !member.station_weights.some(sw => Number(sw.station_id) === Number(qId))
+                                })
                                 .map(qId => (
                                     <Chip
                                         key={qId}
                                         label={`+ ${masterStations.find(m => m.id === qId)?.abbr || '??'}`}
                                         variant="outlined" size="small"
-                                        onClick={() => onOpenWeight(member)}
+                                        onClick={() => {
+                                            console.log("QUAL CHIP CLICKED for:", member.person_name);
+                                            onOpenWeight(member);
+                                        }}
                                         sx={{ height: 20, fontSize: '0.65rem', borderStyle: 'dashed', cursor: 'pointer' }}
                                     />
                                 ))

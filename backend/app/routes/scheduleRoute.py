@@ -1,16 +1,21 @@
 from flask import Blueprint, request, jsonify
 from sqlalchemy.orm import selectinload
+from sqlalchemy import select
+from sqlalchemy.orm.attributes import flag_modified
+
 from app import db
 from ..models import (
     Schedule,
     ScheduleMembership,
     MembershipStationWeight,
     ScheduleDay,
+    ScheduleCandidate,
 )
 from ..utils.schedule_utils import generate_schedule_days, populate_holiday_table
 from ..utils.schedule_summary_util import get_schedule_summary_data
 from ..utils.quota_calculator import calculate_schedule_quotas
 from ..utils.schedule_validator import validate_schedule
+from ..utils.optimization_service import run_schedule_optimization
 from datetime import datetime, date
 
 schedule_bp = Blueprint("schedules", __name__)
@@ -165,6 +170,14 @@ def update_schedule(id):
     if "status" in data:
         schedule.status = data["status"]
 
+    # 🟢 1. Handle the JSON Dictionary Field
+    if "group_weights" in data:
+        # Ensure it is a dictionary
+        if isinstance(data["group_weights"], dict):
+            schedule.group_weights = data["group_weights"]
+            # 🟢 2. Tell SQLAlchemy the JSON content changed
+            flag_modified(schedule, "group_weights")
+
     # Optimization / Goat Points Weights
     optimization_keys = [
         "weight_quota_deviation",
@@ -181,4 +194,38 @@ def update_schedule(id):
                 setattr(schedule, key, float(data[key]))
 
     db.session.commit()
+    # 🟢 3. Return the full object so the frontend sees the new weights
     return jsonify(schedule.to_dict(summary_only=False))
+
+
+@schedule_bp.route("/schedules/<int:id>/generate", methods=["POST"])
+def generate_candidates(id):
+    """
+    Triggers the optimization solver to generate multiple schedule options.
+    """
+    data = request.get_json() or {}
+    num_candidates = data.get("num_candidates", 5)
+
+    # Run the service logic you provided
+    result = run_schedule_optimization(id, num_candidates=num_candidates)
+
+    if result.get("status") == "error":
+        return jsonify(result), 404
+
+    return jsonify(result), 200
+
+
+@schedule_bp.route("/schedules/<int:id>/candidates", methods=["GET"])
+def get_candidates(id):
+    # 🟢 Use select() to find all candidates matching the schedule_id
+    stmt = (
+        select(ScheduleCandidate)
+        .filter_by(schedule_id=id)
+        .order_by(ScheduleCandidate.score.asc())  # Best scores first
+    )
+
+    # Execute the query and get all results
+    candidates = db.session.scalars(stmt).all()
+
+    # Return as a JSON list
+    return jsonify([c.to_dict() for c in candidates]), 200

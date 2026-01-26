@@ -11,6 +11,7 @@ import SolverDashboard from './optimization/SolverDashboard';
 
 export default function ConfigurationTab({
     summary,
+    schedule,
     groups,
     masterStations,
     onRemoveStation,
@@ -85,7 +86,7 @@ export default function ConfigurationTab({
                     </Box>
 
                     <List dense sx={{ bgcolor: '#f9f9f9', borderRadius: 1, maxHeight: '400px', overflow: 'auto', border: '1px solid #eee' }}>
-                        {summary?.memberships?.map((mem) => (
+                        {schedule?.memberships?.map((mem) => (
                             <PersonnelListItem
                                 key={mem.id}
                                 member={mem}
@@ -105,7 +106,7 @@ export default function ConfigurationTab({
             <Grid item xs={12} md={6}>
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                     <OptimizationSettings
-                        schedule={summary}
+                        schedule={schedule}
                         groups={groups || []}
                         onSave={onSaveSettings}
                     />

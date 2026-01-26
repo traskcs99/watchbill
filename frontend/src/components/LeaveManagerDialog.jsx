@@ -48,7 +48,7 @@ export default function LeaveManagerDialog({ open, onClose, member, onSave }) {
         <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth>
             <DialogTitle>
                 Add Leave Period
-                <Typography variant="subtitle2" color="text.secondary" component="span" sx={{ display: 'block' }}>
+                <Typography variant="subtitle2" color="text.secondary" component="div" sx={{ display: 'block' }}>
                     Personnel: {member.person_name}
                 </Typography>
             </DialogTitle>
