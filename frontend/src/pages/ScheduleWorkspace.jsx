@@ -9,7 +9,6 @@ import SettingsIcon from '@mui/icons-material/Settings';
 import AssignmentIcon from '@mui/icons-material/Assignment';
 import BarChartIcon from '@mui/icons-material/BarChart';
 
-
 // Sub-Components
 import ScheduleCalendar from '../components/ScheduleCalendar';
 import ConfigurationTab from '../components/ConfigurationTab';
@@ -20,6 +19,7 @@ import LeaveManagerDialog from '../components/LeaveManagerDialog';
 import AlertsList from '../components/AlertsList';
 import MemberConfigDialog from '../components/MemberConfigDialog';
 import MemberPickerDialog from '../components/MemberPickerDialog';
+
 // Helper for Accessibility Props
 function a11yProps(index) {
     return {
@@ -38,7 +38,7 @@ export default function ScheduleWorkspace() {
     const [loading, setLoading] = useState(true);
     const [masterStations, setMasterStations] = useState([]);
     const [allPersonnel, setAllPersonnel] = useState([]);
-    const [allGroups, setAllGroups] = useState([]); // 🟢 Added Group State
+    const [allGroups, setAllGroups] = useState([]);
 
     const [selectedDay, setSelectedDay] = useState(null);
     const [activeTab, setActiveTab] = useState(0);
@@ -70,7 +70,7 @@ export default function ScheduleWorkspace() {
                 fetch(`/api/schedules/${scheduleId}/assignments`).then(res => res.ok ? res.json() : []),
                 fetch(`/api/exclusions/schedule/${scheduleId}`).then(res => res.ok ? res.json() : []),
                 fetch(`/api/schedules/${scheduleId}/alerts`).then(res => res.ok ? res.json() : []),
-                fetch('/api/groups').then(res => res.json()) // 🟢 Added Group Fetch
+                fetch('/api/groups').then(res => res.json())
             ]);
 
             setSchedule(schData);
@@ -82,7 +82,7 @@ export default function ScheduleWorkspace() {
             setAssignments(assignmentsRes);
             setExclusions(exclusionsRes);
             setAlerts(alertsRes);
-            setAllGroups(groupsRes); // 🟢 Set Group State
+            setAllGroups(groupsRes);
             setLoading(false);
         } catch (err) {
             console.error("Error loading workspace:", err);
@@ -113,32 +113,31 @@ export default function ScheduleWorkspace() {
 
     useEffect(() => { fetchData(); }, [fetchData]);
 
-    // 🟢 AI OPTIMIZATION HANDLER
     const handleSaveOptimizationSettings = async (payload) => {
         try {
-            // 1. Send the PATCH request
             const response = await fetch(`/api/schedules/${scheduleId}`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload) // Payload should be { weight_quota_deviation, group_weights, etc. }
+                body: JSON.stringify(payload)
             });
 
             if (!response.ok) throw new Error("Failed to update database");
-
             const updatedSchedule = await response.json();
-
-            // 2. IMPORTANT: Update the local state with what the DB just sent back
             setSchedule(updatedSchedule);
-
             console.log("Database updated successfully:", updatedSchedule.group_weights);
         } catch (err) {
             console.error("Save Error:", err);
         }
     };
 
-    // -- OTHER HANDLERS --
+    // -- HANDLERS --
     const handleTabChange = useCallback((_, newValue) => setActiveTab(newValue), []);
     const handleSelectDay = useCallback((day) => setSelectedDay(day), []);
+
+    // Highlight Handler
+    const handleToggleHighlight = useCallback((memberId) => {
+        setHighlightedMemberId(prev => prev === memberId ? null : memberId);
+    }, []);
 
     const handleAddStation = async (stationId) => {
         const res = await fetch(`/api/schedules/${scheduleId}/stations`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ station_id: stationId }) });
@@ -153,9 +152,6 @@ export default function ScheduleWorkspace() {
 
     const handleOpenWeightSlider = (mem) => {
         if (!mem) return;
-        console.log("Parent Workspace: Opening slider for", mem.person_name);
-
-        // Set to null first, then set the member to trigger a clean mount
         setEditingMember(null);
         setTimeout(() => {
             setEditingMember(mem);
@@ -196,7 +192,12 @@ export default function ScheduleWorkspace() {
         const targetAssignment = assignments.find(a => a.day_id === dayId && a.station_id === stationId);
         if (!targetAssignment) return;
         try {
-            const res = await fetch(`/api/assignments/${targetAssignment.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ membership_id: membershipId || null, is_locked: true }) });
+            const shouldLock = !!membershipId;
+            const res = await fetch(`/api/assignments/${targetAssignment.id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ membership_id: membershipId || null, is_locked: shouldLock })
+            });
             if (res.ok) { refreshOperationalData(); }
         } catch (err) { console.error(err); }
     }, [assignments, refreshOperationalData]);
@@ -207,22 +208,26 @@ export default function ScheduleWorkspace() {
             if (res.ok) { refreshOperationalData(); }
         } catch (err) { console.error(err); }
     }, [refreshOperationalData]);
+
     const handleOpenLeaveDialog = (mem) => {
         setActiveLeaveMember(mem);
         setLeaveDialogOpen(true);
     };
+
     if (loading) return <Box p={5} textAlign="center"><CircularProgress /></Box>;
     if (!schedule) return <Typography p={5}>Schedule not found.</Typography>;
 
     return (
-        <Box sx={{ p: 1, bgcolor: '#f4f6f8', height: '100vh', display: 'flex', flexDirection: 'column' }}>
+        <Box sx={{ pl: 1, pt: 1, pb: 1, pr: 0, bgcolor: '#f4f6f8', height: '100vh', display: 'flex', flexDirection: 'column' }}>
             <Breadcrumbs separator={<NavigateNextIcon fontSize="small" />} sx={{ mb: 1, px: 1 }}>
                 <Link underline="hover" color="inherit" href="/">Schedules</Link>
                 <Typography color="text.primary" fontWeight="bold">{schedule.name}</Typography>
             </Breadcrumbs>
 
             <Box sx={{ display: 'flex', gap: 1, flexGrow: 1, overflow: 'hidden' }}>
-                <Box sx={{ flex: 3, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+
+                {/* CALENDAR (Flex 1) */}
+                <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                     <ScheduleCalendar
                         days={days}
                         selectedDayId={selectedDay?.id}
@@ -237,11 +242,23 @@ export default function ScheduleWorkspace() {
                     />
                 </Box>
 
-                <Paper sx={{ flex: 1, display: 'flex', flexDirection: 'column', borderRadius: 2, overflow: 'hidden', border: '1px solid #e0e0e0', minWidth: 350 }}>
-                    <Tabs value={activeTab} onChange={handleTabChange} variant="fullWidth" sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'white', minHeight: '60px' }}>
-                        <Tab icon={<AssignmentIcon fontSize="small" />} label="Ops" {...a11yProps(0)} />
-                        <Tab icon={<SettingsIcon fontSize="small" />} label="Config" {...a11yProps(1)} />
-                        <Tab icon={<BarChartIcon fontSize="small" />} label="Workload" {...a11yProps(2)} />
+                {/* 🟢 RIGHT PANEL - INCREASED WIDTH TO 550px */}
+                <Paper
+                    sx={{
+                        width: '550px', // <-- Increased from 440px
+                        flexShrink: 0,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        borderRadius: '8px 0 0 8px',
+                        borderLeft: '1px solid #e0e0e0',
+                        overflow: 'hidden',
+                        bgcolor: 'white'
+                    }}
+                >
+                    <Tabs value={activeTab} onChange={handleTabChange} variant="fullWidth" sx={{ borderBottom: 1, borderColor: 'divider', minHeight: '50px' }}>
+                        <Tab icon={<AssignmentIcon fontSize="small" />} label="Ops" {...a11yProps(0)} iconPosition="start" sx={{ minHeight: 50 }} />
+                        <Tab icon={<SettingsIcon fontSize="small" />} label="Config" {...a11yProps(1)} iconPosition="start" sx={{ minHeight: 50 }} />
+                        <Tab icon={<BarChartIcon fontSize="small" />} label="Workload" {...a11yProps(2)} iconPosition="start" sx={{ minHeight: 50 }} />
                     </Tabs>
 
                     <Box sx={{ p: 2, flexGrow: 1, overflowY: 'auto', bgcolor: '#fafafa' }}>
@@ -278,6 +295,7 @@ export default function ScheduleWorkspace() {
                                 onOpenMemberConfig={handleOpenMemberConfig}
                                 onSaveSettings={handleSaveOptimizationSettings}
                                 onRefresh={fetchData}
+                                onToggleHighlight={handleToggleHighlight}
                             />
                         )}
                         {activeTab === 2 && (
@@ -288,7 +306,7 @@ export default function ScheduleWorkspace() {
                                 days={days}
                                 stations={schedule.required_stations || []}
                                 exclusions={exclusions}
-                                onToggleHighlight={(id) => setHighlightedMemberId(prev => prev === id ? null : id)}
+                                onToggleHighlight={handleToggleHighlight}
                                 highlightedMemberId={highlightedMemberId}
                             />
                         )}
@@ -297,29 +315,22 @@ export default function ScheduleWorkspace() {
             </Box>
 
             {/* Dialogs */}
-            {/* ScheduleWorkspace.jsx bottom */}
             <WeightDistributionDialog
                 open={weightDialogOpen}
                 onClose={() => setWeightDialogOpen(false)}
-
-                // 🟢 CHANGE THIS: prop name must match the dialog's definition
                 member={editingMember}
-
-                // 🟢 ADD THIS: The dialog needs masterStations to show names
                 masterStations={masterStations}
-
                 scheduleId={scheduleId}
                 onSave={handleSaveWeights}
             />
             <LeaveManagerDialog open={leaveDialogOpen} onClose={() => setLeaveDialogOpen(false)} member={activeLeaveMember} onSave={handleSaveLeave} />
             <MemberConfigDialog open={configDialogOpen} onClose={() => setConfigDialogOpen(false)} member={activeConfigMember} onSave={handleSaveMemberConfig} />
-            {/* 🟢 ADD THIS MISSING DIALOG HERE */}
             <MemberPickerDialog
                 open={isMemberDialogOpen}
                 onClose={() => setIsMemberDialogOpen(false)}
-                personnel={allPersonnel}      // Provided by your fetchData
-                onAdd={handleAddMember}      // Your existing API handler
-                existingMembers={schedule.memberships || []} // Filters out duplicates
+                personnel={allPersonnel}
+                onAdd={handleAddMember}
+                existingMembers={schedule.memberships || []}
             />
         </Box>
     );

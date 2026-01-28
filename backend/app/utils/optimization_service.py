@@ -1,7 +1,10 @@
 import pulp as lp
 import random
 import uuid
-from sqlalchemy import select
+import json
+from datetime import timedelta
+from sqlalchemy import select, delete
+from sqlalchemy.orm import joinedload
 from ..database import db
 from ..models import (
     Schedule,
@@ -10,20 +13,45 @@ from ..models import (
     ScheduleMembership,
     Assignment,
     ScheduleStation,
+    Group,
+    Person,
+    MasterStation,
 )
+from .quota_calculator import calculate_schedule_quotas
 
 
 def run_schedule_optimization(schedule_id: int, num_candidates: int = 5):
     """
-    Generates diverse schedule candidates using Stochastic Weight Perturbation.
-    SQLAlchemy 2.0 Compliant.
+    Generates schedule candidates.
+    ENFORCES HARD CONSTRAINTS:
+    - Qualifications (Member must be qualified for Station)
+    - Leaves (Member must not be on leave on Day)
+    - Lookback Continuity (Respects work done in the lookback period)
     """
-    # 1. Fetch Schedule
+
+    # 1. CLEANUP
+    yield json.dumps(
+        {"type": "progress", "percent": 0, "message": "Clearing previous data..."}
+    ) + "\n"
+    db.session.execute(
+        delete(ScheduleCandidate).where(ScheduleCandidate.schedule_id == schedule_id)
+    )
+    db.session.commit()
+
+    # 2. FETCH DATA
     schedule = db.session.get(Schedule, schedule_id)
     if not schedule:
-        return {"status": "error", "message": "Schedule not found"}
+        yield json.dumps({"type": "error", "message": "Schedule not found"}) + "\n"
+        return
 
-    # 2. Fetch Days (Sorted by Date is CRITICAL for back-to-back checks)
+    yield json.dumps(
+        {"type": "progress", "percent": 5, "message": "Analyzing Constraints..."}
+    ) + "\n"
+
+    all_stations = db.session.query(MasterStation).all()
+    station_name_map = {s.id: s.name for s in all_stations}
+
+    # Fetch Days
     stmt_days = (
         select(ScheduleDay)
         .filter_by(schedule_id=schedule_id)
@@ -32,180 +60,493 @@ def run_schedule_optimization(schedule_id: int, num_candidates: int = 5):
     days = db.session.scalars(stmt_days).all()
     active_days = [d for d in days if not d.is_lookback]
 
-    # 3. Fetch Members
-    stmt_members = select(ScheduleMembership).filter_by(schedule_id=schedule_id)
-    members = db.session.scalars(stmt_members).all()
+    # Fetch Members
+    stmt_members = (
+        select(ScheduleMembership)
+        .filter_by(schedule_id=schedule_id)
+        .options(
+            joinedload(ScheduleMembership.person), joinedload(ScheduleMembership.leaves)
+        )
+    )
+    members = db.session.scalars(stmt_members).unique().all()
 
-    # 4. Fetch Locked Assignments
+    # Fetch Locks
     stmt_locks = select(Assignment).filter_by(schedule_id=schedule_id, is_locked=True)
     locked_assignments = db.session.scalars(stmt_locks).all()
     locked_map = {(a.day_id, a.station_id): a.membership_id for a in locked_assignments}
 
-    # Define Shifts
-    shifts = []
-    # Note: Ensure schedule.required_stations is populated (lazy loading handled by SA)
+    # 🟢 FETCH HISTORY (Assignments including Lookback)
+    # We need to know who worked on the lookback days to enforce spacing.
+    stmt_history = (
+        select(Assignment)
+        .join(ScheduleDay)
+        .filter(Assignment.schedule_id == schedule_id)
+        .filter(Assignment.membership_id.is_not(None))
+        .options(joinedload(Assignment.day))
+    )
+    history_records = db.session.scalars(stmt_history).all()
+
+    # Map: (member_id, date_obj) -> True
+    history_work_map = {(a.membership_id, a.day.date) for a in history_records}
+
     stations = schedule.required_stations
 
-    for day in active_days:
-        for station in stations:
-            shifts.append((day.id, station.id))
-
-    # Safe Group Weights Access
-    group_weights = {
+    # --- SENSITIVITY & CONFIG ---
+    schedule_group_weights = {
         str(k): float(v) for k, v in (schedule.group_weights or {}).items()
     }
+
+    def get_member_priority(member) -> float:
+        group_id = member.person.group_id if member.person else None
+        if group_id and str(group_id) in schedule_group_weights:
+            return schedule_group_weights[str(group_id)]
+        return 1.0
+
+    quota_targets = calculate_schedule_quotas(schedule_id)
+    day_weight_map = {d.id: float(d.weight) for d in active_days}
+
+    # --- VALIDITY CHECK (The "Hard Constraints") ---
+    valid_shifts = set()
+
+    def is_member_on_leave(member, date_obj):
+        for l in member.leaves:
+            if l.start_date <= date_obj <= l.end_date:
+                return True
+        return False
+
+    for m in members:
+        # Lazy load qualifications safely
+        qualified_station_ids = {int(q.station_id) for q in m.person.qualifications}
+
+        for d in active_days:
+            if is_member_on_leave(m, d.date):
+                continue
+
+            for s in stations:
+                if int(s.station_id) not in qualified_station_ids:
+                    continue
+
+                valid_shifts.add((m.id, d.id, s.id))
+
+    # Force Locks
+    for (l_day_id, l_station_id), l_member_id in locked_map.items():
+        if l_member_id is not None:
+            valid_shifts.add((l_member_id, l_day_id, l_station_id))
+
+    # Pre-Flight Check
+    unfillable_slots = []
+    for d in active_days:
+        for s in stations:
+            has_coverage = any((m.id, d.id, s.id) in valid_shifts for m in members)
+            if not has_coverage:
+                st_name = station_name_map.get(s.station_id, f"Station {s.station_id}")
+                unfillable_slots.append((d, s, st_name))
+
+    if unfillable_slots:
+        bad_day, bad_station, bad_st_name = unfillable_slots[0]
+        details = []
+        for m in members:
+            reason = "Unknown"
+            if is_member_on_leave(m, bad_day.date):
+                reason = "On Leave"
+            else:
+                q_ids = {int(q.station_id) for q in m.person.qualifications}
+                if int(bad_station.station_id) not in q_ids:
+                    reason = f"Not Qualified (Has {list(q_ids)}, Needs {bad_station.station_id})"
+                else:
+                    reason = "Valid (Logic Error?)"
+            details.append(f"{m.person.name}: {reason}")
+
+        error_msg = (
+            f"Infeasible! No one can work {bad_day.date} ({bad_st_name}).\n"
+            f"Analysis of staff:\n" + "\n".join(details[:10])
+        )
+        if len(details) > 10:
+            error_msg += "\n...and others."
+        yield json.dumps({"type": "error", "message": error_msg}) + "\n"
+        return
+
+    # --- LONG WEEKEND LOGIC ---
+    weekend_groups = []
+    sorted_active_days = sorted(active_days, key=lambda x: x.date)
+
+    def is_weekend_part(d):
+        return d.date.weekday() in [5, 6] or getattr(d, "is_holiday", False)
+
+    potential_indices = [
+        i for i, d in enumerate(sorted_active_days) if is_weekend_part(d)
+    ]
+    if potential_indices:
+        current_cluster = [sorted_active_days[potential_indices[0]]]
+        for i in range(1, len(potential_indices)):
+            prev = potential_indices[i - 1]
+            curr = potential_indices[i]
+            if (
+                sorted_active_days[curr].date - sorted_active_days[prev].date
+            ).days == 1:
+                current_cluster.append(sorted_active_days[curr])
+            else:
+                weekend_groups.append(current_cluster)
+                current_cluster = [sorted_active_days[curr]]
+        if current_cluster:
+            weekend_groups.append(current_cluster)
+
+    final_weekend_groups = [
+        g for g in weekend_groups if any(d.date.weekday() in [5, 6] for d in g)
+    ]
 
     run_id = str(uuid.uuid4())
     generated_candidates = []
 
-    # Calculate Fair Share
-    active_people_count = len(
-        [m for m in members if (m.override_max_assignments or 99) > 0]
-    )
-    fair_share = len(shifts) / active_people_count if active_people_count else 0
-
-    # --- CANDIDATE GENERATION LOOP ---
+    # --- OPTIMIZATION LOOP ---
     for i in range(num_candidates):
 
-        # A. Perturbation
-        variation = 1.0 if i == 0 else random.uniform(0.85, 1.15)
-        sw_quota = schedule.weight_quota_deviation * variation
-        sw_spacing1 = schedule.weight_spacing_1_day * variation
+        percent = int(((i) / num_candidates) * 100) + 10
+        yield json.dumps(
+            {
+                "type": "progress",
+                "percent": percent,
+                "message": f"Solving Iteration {i+1}...",
+            }
+        ) + "\n"
+
+        var_factor = 1.0 if i == 0 else random.uniform(0.85, 1.15)
+        sw_quota = (schedule.weight_quota_deviation or 1.0) * var_factor
+        sw_goal = (schedule.weight_goal_deviation or 0.5) * var_factor
+        sw_spacing1 = (schedule.weight_spacing_1_day or 1.5) * var_factor
+        sw_spacing2 = (schedule.weight_spacing_2_day or 1.0) * var_factor
+        sw_same_weekend = (schedule.weight_same_weekend or 1.0) * var_factor
+        sw_consecutive = (schedule.weight_consecutive_weekends or 1.5) * var_factor
 
         prob = lp.LpProblem(f"Run_{run_id}_{i}", lp.LpMinimize)
 
-        # B. Variables
+        # Variables
         X = {}
-        for m in members:
-            for day_id, station_id in shifts:
-                X[(m.id, day_id, station_id)] = lp.LpVariable(
-                    f"x_{m.id}_{day_id}_{station_id}_{i}", 0, 1, lp.LpBinary
-                )
+        for m_id, d_id, s_id in valid_shifts:
+            X[(m_id, d_id, s_id)] = lp.LpVariable(
+                f"x_{m_id}_{d_id}_{s_id}_{i}", 0, 1, lp.LpBinary
+            )
 
-        # C. Trackers
+        # 🟢 NEW STRUCTURE: Store penalty REASONS
+        # member_penalties[m.id] = [ { "w": weight, "v": lpVar/expr, "r": "Reason" }, ... ]
         member_penalties = {m.id: [] for m in members}
         solver_objective_terms = []
 
-        # --- D. HARD CONSTRAINTS ---
+        # --- HARD CONSTRAINTS ---
 
-        # 1. Locks: Force Locked Assignments
+        # 1. Locks
         for (l_day, l_station), l_member in locked_map.items():
             if (l_member, l_day, l_station) in X:
                 prob += X[(l_member, l_day, l_station)] == 1
 
-        # 2. Fill: Every shift must have exactly 1 person
-        for day_id, station_id in shifts:
-            prob += lp.lpSum([X[(m.id, day_id, station_id)] for m in members]) == 1
+        # 2. Shift Coverage
+        for day in active_days:
+            for station in stations:
+                available_vars = [
+                    X[(m.id, day.id, station.id)]
+                    for m in members
+                    if (m.id, day.id, station.id) in X
+                ]
+                prob += lp.lpSum(available_vars) == 1
 
-        # 3. One-Per-Day: No one works twice on same day
+        # 3. One Shift Per Day
         for m in members:
             for day in active_days:
-                daily_vars = [X[(m.id, day.id, s.id)] for s in stations]
-                prob += lp.lpSum(daily_vars) <= 1
+                daily_vars = [
+                    X[(m.id, day.id, s.id)]
+                    for s in stations
+                    if (m.id, day.id, s.id) in X
+                ]
+                if daily_vars:
+                    prob += lp.lpSum(daily_vars) <= 1
 
-        # 🟢 4. NO BACK-TO-BACK SHIFTS (CRITICAL FIX) 🟢
-        # Logic: (Work Today) + (Work Tomorrow) <= 1
-        sorted_d_ids = [
-            d.id for d in active_days
-        ]  # Ensure these are sorted chronologically
-
+        # 4. No Back-To-Back (Active Days)
+        sorted_d_ids = [d.id for d in sorted_active_days]
         for m in members:
             for k in range(len(sorted_d_ids) - 1):
                 d_curr = sorted_d_ids[k]
                 d_next = sorted_d_ids[k + 1]
+                vars_curr = [
+                    X[(m.id, d_curr, s.id)]
+                    for s in stations
+                    if (m.id, d_curr, s.id) in X
+                ]
+                vars_next = [
+                    X[(m.id, d_next, s.id)]
+                    for s in stations
+                    if (m.id, d_next, s.id) in X
+                ]
+                if vars_curr and vars_next:
+                    prob += lp.lpSum(vars_curr + vars_next) <= 1
 
-                # Sum of all stations for current day (should be 0 or 1)
-                work_curr = lp.lpSum([X[(m.id, d_curr, s.id)] for s in stations])
-
-                # Sum of all stations for next day
-                work_next = lp.lpSum([X[(m.id, d_next, s.id)] for s in stations])
-
-                # Constraint: You cannot do both
-                prob += work_curr + work_next <= 1, f"NoB2B_{m.id}_{d_curr}_{i}"
-
-        # --- E. SOFT CONSTRAINTS & GROUP SENSITIVITY ---
-
-        def get_sensitivity(member):
-            # Access relationship safely
-            gid = str(member.group_id) if member.group_id else "0"
-            return group_weights.get(gid, 1.0)
-
-        # Quota Logic
+        # 🟢 4b. No Back-To-Back (Lookback Transition)
         for m in members:
-            actual = lp.lpSum([X[(m.id, d, s)] for d, s in shifts])
-            target = fair_share
-            excess = lp.LpVariable(f"excess_{m.id}_{i}", 0)
-            shortage = lp.LpVariable(f"shortage_{m.id}_{i}", 0)
+            for day in active_days:
+                prev_date = day.date - timedelta(days=1)
+                if (m.id, prev_date) in history_work_map:
+                    # They worked yesterday (in lookback), so enforce 0 today
+                    daily_vars = [
+                        X[(m.id, day.id, s.id)]
+                        for s in stations
+                        if (m.id, day.id, s.id) in X
+                    ]
+                    if daily_vars:
+                        prob += lp.lpSum(daily_vars) == 0
 
-            prob += actual - target == excess - shortage
+        # 5. Min/Max Limits
+        for m in members:
+            max_limit = m.override_max_assignments or (
+                m.person.group.max_assignments if m.person.group else 999
+            )
+            min_limit = m.override_min_assignments or (
+                m.person.group.min_assignments if m.person.group else 0
+            )
+            total_vars = [
+                X[(m.id, d.id, s.id)]
+                for d in active_days
+                for s in stations
+                if (m.id, d.id, s.id) in X
+            ]
+            if total_vars:
+                prob += lp.lpSum(total_vars) <= max_limit
+                prob += lp.lpSum(total_vars) >= min_limit
 
-            sensitivity = get_sensitivity(m)
+        # --- SOFT CONSTRAINTS ---
 
-            term = (excess + shortage) * sw_quota * sensitivity
-            solver_objective_terms.append(term)
+        # 1. Quota
+        for m in members:
+            m_vars = [
+                (X[(m.id, d.id, s.id)], day_weight_map.get(d.id, 1.0))
+                for d in active_days
+                for s in stations
+                if (m.id, d.id, s.id) in X
+            ]
+            actual_points = lp.lpSum([v * w for v, w in m_vars])
+            target = quota_targets.get(m.id, 0.0)
+            excess = lp.LpVariable(f"exc_{m.id}_{i}", 0)
+            shortage = lp.LpVariable(f"sht_{m.id}_{i}", 0)
+            prob += actual_points - target == excess - shortage
+            prio = get_member_priority(m)
 
-            member_penalties[m.id].append((schedule.weight_quota_deviation, excess))
-            member_penalties[m.id].append((schedule.weight_quota_deviation, shortage))
+            cost = (excess + shortage) * (sw_quota + sw_goal) * prio
+            solver_objective_terms.append(cost)
 
-        # Spacing Logic (1 Day Gap / Mon-Wed)
+            # 🟢 Track Reason
+            member_penalties[m.id].append(
+                {
+                    "w": (sw_quota + sw_goal) * prio,
+                    "v": excess + shortage,
+                    "r": "Quota Deviation",
+                }
+            )
+
+        # 2. Spacing (1 Day)
         for m in members:
             for k in range(len(sorted_d_ids) - 2):
                 d1 = sorted_d_ids[k]
-                d3 = sorted_d_ids[k + 2]  # Check T and T+2
+                d3 = sorted_d_ids[k + 2]
+                vars_d1 = [
+                    X[(m.id, d1, s.id)] for s in stations if (m.id, d1, s.id) in X
+                ]
+                vars_d3 = [
+                    X[(m.id, d3, s.id)] for s in stations if (m.id, d3, s.id) in X
+                ]
+                if vars_d1 and vars_d3:
+                    is_gap = lp.LpVariable(f"g1_{m.id}_{d1}_{i}", 0, 1, lp.LpBinary)
+                    prob += is_gap >= lp.lpSum(vars_d1 + vars_d3) - 1
+                    prio = get_member_priority(m)
 
-                work_d1 = lp.lpSum([X[(m.id, d1, s.id)] for s in stations])
-                work_d3 = lp.lpSum([X[(m.id, d3, s.id)] for s in stations])
+                    solver_objective_terms.append(is_gap * sw_spacing1 * prio)
+                    # 🟢 Track Reason
+                    member_penalties[m.id].append(
+                        {"w": sw_spacing1 * prio, "v": is_gap, "r": "1-Day Spacing"}
+                    )
 
-                # If d1 + d3 > 1 (meaning 2), then is_gap must be 1
-                is_gap = lp.LpVariable(f"gap1_{m.id}_{d1}_{i}", 0, 1, lp.LpBinary)
-                prob += is_gap >= work_d1 + work_d3 - 1
+            # Check Spacing against Lookback
+            for day in active_days:
+                date_minus_2 = day.date - timedelta(days=2)
+                if (m.id, date_minus_2) in history_work_map:
+                    vars_today = [
+                        X[(m.id, day.id, s.id)]
+                        for s in stations
+                        if (m.id, day.id, s.id) in X
+                    ]
+                    if vars_today:
+                        prio = get_member_priority(m)
+                        term = lp.lpSum(vars_today) * sw_spacing1 * prio
+                        solver_objective_terms.append(term)
+                        # 🟢 Track Reason (using the expression directly)
+                        member_penalties[m.id].append(
+                            {
+                                "w": sw_spacing1 * prio,
+                                "v": lp.lpSum(vars_today),
+                                "r": "1-Day Spacing (Lookback)",
+                            }
+                        )
 
-                sensitivity = get_sensitivity(m)
-                solver_objective_terms.append(is_gap * sw_spacing1 * sensitivity)
-                member_penalties[m.id].append((schedule.weight_spacing_1_day, is_gap))
+        # 3. Spacing (2 Day)
+        for m in members:
+            if len(sorted_d_ids) >= 4:
+                for k in range(len(sorted_d_ids) - 3):
+                    d1 = sorted_d_ids[k]
+                    d4 = sorted_d_ids[k + 3]
+                    vars_d1 = [
+                        X[(m.id, d1, s.id)] for s in stations if (m.id, d1, s.id) in X
+                    ]
+                    vars_d4 = [
+                        X[(m.id, d4, s.id)] for s in stations if (m.id, d4, s.id) in X
+                    ]
+                    if vars_d1 and vars_d4:
+                        is_gap2 = lp.LpVariable(
+                            f"g2_{m.id}_{d1}_{i}", 0, 1, lp.LpBinary
+                        )
+                        prob += is_gap2 >= lp.lpSum(vars_d1 + vars_d4) - 1
+                        prio = get_member_priority(m)
 
-        # F. Solve
-        prob += lp.lpSum(solver_objective_terms)
+                        solver_objective_terms.append(is_gap2 * sw_spacing2 * prio)
+                        # 🟢 Track Reason
+                        member_penalties[m.id].append(
+                            {
+                                "w": sw_spacing2 * prio,
+                                "v": is_gap2,
+                                "r": "2-Day Spacing",
+                            }
+                        )
 
-        # Using GLPK or CBC (default)
-        # msg=0 suppresses console spam
-        prob.solve(lp.PULP_CBC_CMD(msg=0))
+        # 4. Long Weekends
+        worked_weekend_vars = {m.id: [] for m in members}
+        for idx, w_days in enumerate(final_weekend_groups):
+            for m in members:
+                w_vars = [
+                    X[(m.id, d.id, s.id)]
+                    for d in w_days
+                    for s in stations
+                    if (m.id, d.id, s.id) in X
+                ]
+                if not w_vars:
+                    worked_weekend_vars[m.id].append(0)
+                    continue
+                work_sum = lp.lpSum(w_vars)
+                prio = get_member_priority(m)
+                if len(w_days) > 1:
+                    is_same_weekend = lp.LpVariable(
+                        f"swk_{m.id}_{idx}_{i}", 0, 1, lp.LpBinary
+                    )
+                    prob += is_same_weekend >= work_sum - 1
+                    solver_objective_terms.append(
+                        is_same_weekend * sw_same_weekend * prio
+                    )
+                    # 🟢 Track Reason
+                    member_penalties[m.id].append(
+                        {
+                            "w": sw_same_weekend * prio,
+                            "v": is_same_weekend,
+                            "r": "Same Weekend",
+                        }
+                    )
+                is_worked = lp.LpVariable(f"wwk_{m.id}_{idx}_{i}", 0, 1, lp.LpBinary)
+                prob += is_worked >= work_sum * (1.0 / len(w_days))
+                worked_weekend_vars[m.id].append(is_worked)
 
-        # G. Save Results
-        if lp.LpStatus[prob.status] == "Optimal":
+        # 5. Consecutive Weekends
+        for m in members:
+            w_vars = worked_weekend_vars[m.id]
+            for k in range(len(w_vars) - 1):
+                v1 = w_vars[k]
+                v2 = w_vars[k + 1]
+                if isinstance(v1, int) and v1 == 0:
+                    continue
+                if isinstance(v2, int) and v2 == 0:
+                    continue
+                is_cons = lp.LpVariable(f"cwk_{m.id}_{k}_{i}", 0, 1, lp.LpBinary)
+                prob += is_cons >= v1 + v2 - 1
+                prio = get_member_priority(m)
+                solver_objective_terms.append(is_cons * sw_consecutive * prio)
+                # 🟢 Track Reason
+                member_penalties[m.id].append(
+                    {
+                        "w": sw_consecutive * prio,
+                        "v": is_cons,
+                        "r": "Consecutive Weekends",
+                    }
+                )
+
+        # F. Minimax Equity
+        max_penalty = lp.LpVariable(f"MaxPen_{i}", 0)
+        for m in members:
+            if member_penalties[m.id]:
+                # Updated to use dictionary structure
+                m_total = lp.lpSum(
+                    [item["w"] * item["v"] for item in member_penalties[m.id]]
+                )
+                prob += max_penalty >= m_total
+
+        prob += lp.lpSum(solver_objective_terms) + (100.0 * max_penalty)
+
+        # --- SOLVE ---
+        prob.solve(lp.PULP_CBC_CMD(msg=0, timeLimit=2, gapRel=0.05))
+
+        # --- SAVE ---
+        is_valid = (prob.status == lp.LpStatusOptimal) or (
+            lp.value(prob.objective) is not None
+            and prob.status != lp.LpStatusInfeasible
+        )
+
+        if is_valid:
             assignment_map = {}
             metric_data = {}
-            total_reporting_score = 0.0
+            total_pen = 0.0
 
             for (m_id, d_id, s_id), var in X.items():
                 if var.varValue and var.varValue > 0.5:
                     assignment_map[f"{d_id}_{s_id}"] = m_id
 
             for m in members:
-                raw_score = 0.0
-                for base_weight, var in member_penalties[m.id]:
-                    if var.varValue and var.varValue > 0:
-                        raw_score += var.varValue * base_weight
+                pen_breakdown = {}
+                indiv_pen = 0.0
 
-                total_reporting_score += raw_score
-                assigned_count = sum(1 for k, v in assignment_map.items() if v == m.id)
+                # 🟢 EXTRACT BREAKDOWN
+                for item in member_penalties[m.id]:
+                    val = lp.value(item["v"])
+                    if val and val > 0.01:
+                        points = val * item["w"]
+                        indiv_pen += points
+                        # Group by reason
+                        reason = item["r"]
+                        pen_breakdown[reason] = pen_breakdown.get(reason, 0) + points
+
+                # Round breakdowns for clean JSON
+                pen_breakdown = {k: round(v, 2) for k, v in pen_breakdown.items()}
+                total_pen += indiv_pen
+
+                assigned_ids = [k for k, v in assignment_map.items() if v == m.id]
+                assigned_count = len(assigned_ids)
+                points = sum(
+                    day_weight_map.get(int(k.split("_")[0]), 1.0) for k in assigned_ids
+                )
 
                 metric_data[m.person.name] = {
-                    "score": round(raw_score, 2),
-                    "assigned": assigned_count,
                     "member_id": m.id,
-                    "group_factor": get_sensitivity(m),
+                    "goat_points": round(indiv_pen, 2),
+                    "breakdown": pen_breakdown,  # <--- NEW FIELD FOR TOOLTIPS
+                    "assigned": assigned_count,
+                    "points": round(points, 2),
+                    "quota_target": round(quota_targets.get(m.id, 0), 2),
+                    "group_priority": round(get_member_priority(m), 2),
                 }
 
             cand = ScheduleCandidate(
                 schedule_id=schedule_id,
                 run_id=run_id,
-                score=round(total_reporting_score, 2),
+                score=round(total_pen, 2),
                 assignments_data=assignment_map,
                 metrics_data=metric_data,
             )
             db.session.add(cand)
             generated_candidates.append(cand)
 
-    db.session.commit()
-    return {"status": "success", "run_id": run_id, "count": len(generated_candidates)}
+        db.session.commit()
+
+    yield json.dumps(
+        {"type": "complete", "run_id": run_id, "count": len(generated_candidates)}
+    ) + "\n"

@@ -1,6 +1,6 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, Response, stream_with_context
 from sqlalchemy.orm import selectinload
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from sqlalchemy.orm.attributes import flag_modified
 
 from app import db
@@ -10,6 +10,7 @@ from ..models import (
     MembershipStationWeight,
     ScheduleDay,
     ScheduleCandidate,
+    Assignment,
 )
 from ..utils.schedule_utils import generate_schedule_days, populate_holiday_table
 from ..utils.schedule_summary_util import get_schedule_summary_data
@@ -200,19 +201,16 @@ def update_schedule(id):
 
 @schedule_bp.route("/schedules/<int:id>/generate", methods=["POST"])
 def generate_candidates(id):
-    """
-    Triggers the optimization solver to generate multiple schedule options.
-    """
     data = request.get_json() or {}
     num_candidates = data.get("num_candidates", 5)
 
-    # Run the service logic you provided
-    result = run_schedule_optimization(id, num_candidates=num_candidates)
+    def generate():
+        # Call the generator service
+        # We assume run_schedule_optimization is now a generator
+        for chunk in run_schedule_optimization(id, num_candidates=num_candidates):
+            yield chunk
 
-    if result.get("status") == "error":
-        return jsonify(result), 404
-
-    return jsonify(result), 200
+    return Response(stream_with_context(generate()), mimetype="application/x-ndjson")
 
 
 @schedule_bp.route("/schedules/<int:id>/candidates", methods=["GET"])
@@ -229,3 +227,89 @@ def get_candidates(id):
 
     # Return as a JSON list
     return jsonify([c.to_dict() for c in candidates]), 200
+
+
+@schedule_bp.route("/schedules/<int:id>/apply", methods=["POST"])
+def apply_candidate(id):
+    """
+    Applies a candidate by UPDATING existing slots.
+    """
+    data = request.get_json()
+    candidate_id = data.get("candidate_id")
+
+    candidate = db.session.get(ScheduleCandidate, candidate_id)
+    if not candidate:
+        return jsonify({"error": "Candidate not found"}), 404
+
+    # 1. Fetch ALL existing assignments for this schedule
+    # We map them by (day_id, station_id) for fast lookup
+    existing_assignments = db.session.scalars(
+        select(Assignment).filter_by(schedule_id=id)
+    ).all()
+
+    assignment_map = {(a.day_id, a.station_id): a for a in existing_assignments}
+
+    updated_count = 0
+
+    # 2. Iterate through the Candidate's suggestions
+    for key, member_id in candidate.assignments_data.items():
+        day_id, station_id = map(int, key.split("_"))
+
+        # Find the existing slot in the DB
+        slot = assignment_map.get((day_id, station_id))
+
+        if slot:
+            # SAFETY: Only update if NOT locked
+            if not slot.is_locked:
+                slot.membership_id = member_id
+                updated_count += 1
+        else:
+            # Edge Case: The candidate has a slot that doesn't exist in the DB?
+            # You might want to create it, or ignore it.
+            # Given your setup, this shouldn't happen if generate_assignments runs correctly.
+            pass
+
+    # 3. CRITICAL: What about slots NOT in the candidate?
+    # The solver fills every required slot, so this is mostly handled.
+    # But if you want to be safe, you could loop through assignment_map
+    # and set membership_id=None if it wasn't in candidate.assignments_data
+
+    db.session.commit()
+
+    return (
+        jsonify({"message": "Schedule updated successfully", "updated": updated_count}),
+        200,
+    )
+
+
+from sqlalchemy import update
+
+# ... other imports
+
+
+@schedule_bp.route("/schedules/<int:id>/clear", methods=["POST"])
+def clear_assignments(id):
+    """
+    Resets UNLOCKED assignments to Empty Slots (membership_id = None).
+    Does NOT delete the rows, preserving the grid structure.
+    """
+    # UPDATE Assignment SET membership_id = NULL WHERE schedule_id = id AND is_locked != True
+    stmt = (
+        update(Assignment)
+        .where(Assignment.schedule_id == id)
+        .where(Assignment.is_locked != True)
+        .values(membership_id=None)
+    )
+
+    result = db.session.execute(stmt)
+    db.session.commit()
+
+    return (
+        jsonify(
+            {
+                "message": "Schedule cleared (slots reset to empty)",
+                "updated_count": result.rowcount,
+            }
+        ),
+        200,
+    )

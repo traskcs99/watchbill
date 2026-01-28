@@ -5,7 +5,6 @@ import {
 import PeopleIcon from '@mui/icons-material/People';
 import PersonnelListItem from './PersonnelListItem';
 
-// Optimization Imports
 import OptimizationSettings from './optimization/OptimizationSettings';
 import SolverDashboard from './optimization/SolverDashboard';
 
@@ -23,7 +22,8 @@ export default function ConfigurationTab({
     onDeleteLeave,
     onOpenMemberConfig,
     onSaveSettings,
-    onRefresh
+    onRefresh,
+    onToggleHighlight // 🟢 NEW PROP
 }) {
 
     return (
@@ -31,7 +31,6 @@ export default function ConfigurationTab({
             {/* LEFT COLUMN: SETUP DATA */}
             <Grid item xs={12} md={6}>
                 <Box>
-                    {/* 1. STATION TEMPLATE (Abbr Toggle List) */}
                     <Typography variant="subtitle2" fontWeight="bold" color="text.secondary" gutterBottom sx={{ textTransform: 'uppercase', letterSpacing: 1 }}>
                         Watch Template
                     </Typography>
@@ -39,33 +38,17 @@ export default function ConfigurationTab({
                     <Paper variant="outlined" sx={{ p: 2, bgcolor: '#fcfcfc', mb: 3 }}>
                         <Grid container spacing={1}>
                             {masterStations.map((st) => {
-                                // Check if this Master Station is currently "Active" in this schedule
-                                const activeLink = summary?.required_stations?.find(
-                                    (rs) => rs.station_id === st.id
-                                );
-
+                                const activeLink = summary?.required_stations?.find(rs => rs.station_id === st.id);
                                 return (
-                                    <Grid item xs={4} key={st.id}>
+                                    <Grid item key={st.id}>
                                         <Button
-                                            fullWidth
-                                            size="small"
                                             variant={activeLink ? "contained" : "outlined"}
                                             color={activeLink ? "primary" : "inherit"}
+                                            size="small"
                                             onClick={() => activeLink ? onRemoveStation(activeLink.id) : onAddStationClick(st.id)}
-                                            sx={{
-                                                fontWeight: 'bold',
-                                                py: 1,
-                                                fontSize: '0.75rem',
-                                                borderColor: activeLink ? 'primary.main' : 'grey.300',
-                                                bgcolor: activeLink ? 'primary.main' : 'white',
-                                                color: activeLink ? 'white' : 'text.primary',
-                                                '&:hover': {
-                                                    bgcolor: activeLink ? 'error.main' : 'primary.50',
-                                                    color: activeLink ? 'white' : 'primary.main',
-                                                }
-                                            }}
+                                            sx={{ borderRadius: 4, textTransform: 'none', fontSize: '0.75rem', minWidth: 60 }}
                                         >
-                                            {activeLink ? `✕ ${st.abbr}` : `+ ${st.abbr}`}
+                                            {st.abbr}
                                         </Button>
                                     </Grid>
                                 );
@@ -73,14 +56,17 @@ export default function ConfigurationTab({
                         </Grid>
                     </Paper>
 
-                    <Divider sx={{ my: 3 }} />
-
-                    {/* 2. PERSONNEL POOL SECTION */}
                     <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
                         <Typography variant="subtitle2" fontWeight="bold" color="text.secondary" sx={{ textTransform: 'uppercase', letterSpacing: 1 }}>
-                            Personnel Pool
+                            Personnel Pool ({schedule?.memberships?.length || 0})
                         </Typography>
-                        <Button size="small" variant="text" startIcon={<PeopleIcon />} onClick={onAddMemberClick} sx={{ fontSize: '0.7rem' }}>
+                        <Button
+                            startIcon={<PeopleIcon />}
+                            size="small"
+                            variant="contained"
+                            onClick={onAddMemberClick}
+                            sx={{ textTransform: 'none' }}
+                        >
                             Add Person
                         </Button>
                     </Box>
@@ -113,6 +99,7 @@ export default function ConfigurationTab({
                     <SolverDashboard
                         scheduleId={summary?.id}
                         onScheduleUpdated={onRefresh}
+                        onToggleHighlight={onToggleHighlight} // 🟢 Pass prop to Dashboard
                     />
                 </Box>
             </Grid>

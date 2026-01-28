@@ -44,6 +44,7 @@ def assignment_env(session):
         station_id=stn.id,
         membership_id=None,
         availability_estimate=0.0,
+        is_locked=False,  # Start unlocked
     )
     session.add(assign)
     session.commit()
@@ -72,7 +73,7 @@ def test_get_assignments_eager_loading(client, assignment_env):
 
 
 def test_manual_assign_and_lock(client, assignment_env):
-    """Test the most common user action: assigning a person and locking the slot."""
+    """Test explicit locking: assigning a person and explicitly sending is_locked=True."""
     payload = {"membership_id": assignment_env["membership"].id, "is_locked": True}
     res = client.patch(
         f"/api/assignments/{assignment_env['assignment'].id}", json=payload
@@ -129,3 +130,26 @@ def test_clear_assignment(client, assignment_env, session):
     assert res.status_code == 200
     assert res.json["membership_id"] is None
     assert res.json["assigned_person_name"] is None
+
+
+# --- 3. LOGIC TESTS (New) ---
+
+
+def test_auto_lock_unlock_logic(client, assignment_env, session):
+    """
+    Verify the smart logic:
+    1. Assigning a person -> Auto Lock (is_locked=True)
+    2. Clearing a person -> Auto Unlock (is_locked=False)
+    """
+    assign_id = assignment_env["assignment"].id
+    mem_id = assignment_env["membership"].id
+
+    # Step 1: Assign a person (Don't send 'is_locked', let the backend decide)
+    res = client.patch(f"/api/assignments/{assign_id}", json={"membership_id": mem_id})
+    assert res.status_code == 200
+    assert res.json["is_locked"] is True, "Should auto-lock when a person is assigned"
+
+    # Step 2: Clear the person (Don't send 'is_locked')
+    res = client.patch(f"/api/assignments/{assign_id}", json={"membership_id": None})
+    assert res.status_code == 200
+    assert res.json["is_locked"] is False, "Should auto-unlock when cleared"

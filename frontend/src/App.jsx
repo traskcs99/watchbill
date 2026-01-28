@@ -4,12 +4,11 @@ import {
   Box, ThemeProvider, createTheme, Tabs, Tab, Container
 } from '@mui/material';
 import Dashboard from './pages/Dashboard';
-import Personnel from './pages/Personnel'; // <--- ADD THIS IMPORT!
+import Personnel from './pages/Personnel';
 import Groups from './pages/Groups';
 import Stations from './pages/Stations';
 import Qualifications from './pages/Qualifications';
 import ScheduleWorkspace from './pages/ScheduleWorkspace';
-
 
 // Custom Command Theme
 const theme = createTheme({
@@ -28,12 +27,11 @@ function NavTabs() {
   const location = useLocation();
   const mainPaths = ['/', '/groups', '/personnel', '/stations', '/quals'];
 
-  // 2. If the current URL is a main path, use it. Otherwise, use false (no tab highlighted)
   const currentTab = mainPaths.includes(location.pathname) ? location.pathname : false;
   return (
     <Box sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'white' }}>
       <Tabs
-        value={currentTab} // Changed from location.pathname to currentTab
+        value={currentTab}
         centered
         textColor="primary"
         indicatorColor="primary"
@@ -48,14 +46,11 @@ function NavTabs() {
   );
 }
 
-// ... keep your imports and NavTabs ...
-
 function App() {
   return (
     <ThemeProvider theme={theme}>
       <BrowserRouter>
         <CssBaseline />
-        {/* Full viewport width and height */}
         <Box sx={{
           display: 'flex',
           flexDirection: 'column',
@@ -75,10 +70,17 @@ function App() {
 
           <NavTabs />
 
-          {/* Main content area forced to center */}
-          <Box component="main" sx={{ flexGrow: 1, py: 6, width: '100%' }}>
-            <Container maxWidth="lg">
-              {/* Container naturally centers itself if width is 100% */}
+          {/* Main content area */}
+          <Box component="main" sx={{ flexGrow: 1, width: '100%' }}>
+
+            {/* 🟢 UPDATED: maxWidth={false} for full width, px={1} for small 8px gutter */}
+            <Container
+              maxWidth={false}
+              sx={{
+                height: '100%',
+                px: { xs: 1, md: 1 } // Forces 8px padding on all screen sizes
+              }}
+            >
               <Routes>
                 <Route path="/" element={<Dashboard />} />
                 <Route path="/groups" element={<Groups />} />
@@ -88,6 +90,7 @@ function App() {
                 <Route path="/schedules/:scheduleId" element={<ScheduleWorkspace />} />
               </Routes>
             </Container>
+
           </Box>
         </Box>
       </BrowserRouter>

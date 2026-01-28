@@ -46,19 +46,33 @@ def patch_assignment(id):
 
     data = request.get_json()
 
-    # Manual re-assignment or clearing
+    # 1. Handle Membership Change
     if "membership_id" in data:
-        if data["membership_id"] is not None:
-            mem = db.session.get(ScheduleMembership, data["membership_id"])
+        new_member_id = data["membership_id"]
+
+        # If assigning a specific person...
+        if new_member_id is not None:
+            # Validate existence
+            mem = db.session.get(ScheduleMembership, new_member_id)
             if not mem:
                 return jsonify({"error": "Member not found"}), 404
-        assignment.membership_id = data["membership_id"]
 
-    # Solver lock
+            # Logic: If I manually pick someone, I usually want them locked there.
+            assignment.is_locked = True
+            assignment.membership_id = new_member_id
+
+        # If clearing the assignment (Unassigned)...
+        else:
+            # Logic: An empty slot must be unlocked so the solver can use it.
+            assignment.is_locked = False
+            assignment.membership_id = None
+
+    # 2. Allow Explicit Lock Override
+    # (This runs AFTER the auto-logic above, so it takes precedence if sent in the same request)
     if "is_locked" in data:
         assignment.is_locked = bool(data["is_locked"])
 
-    # Update the manpower estimate column
+    # 3. Update Manpower/Availability Estimate
     if "availability_estimate" in data:
         assignment.availability_estimate = data["availability_estimate"]
 
