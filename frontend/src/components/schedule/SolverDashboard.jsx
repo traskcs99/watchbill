@@ -7,17 +7,19 @@ import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
 import axios from 'axios';
-// Ensure this path matches your file structure. 
-// If SolverDashboard is in "src/optimization", use "./CandidateCard"
 import CandidateCard from './CandidateCard';
 
-export default function SolverDashboard({ scheduleId, onScheduleUpdated, onSelectMember }) {
+// 🟢 Added memberships prop
+export default function SolverDashboard({ scheduleId, onScheduleUpdated, onToggleHighlight, masterStations, memberships }) {
     const [loading, setLoading] = useState(false);
     const [clearing, setClearing] = useState(false);
     const [candidates, setCandidates] = useState([]);
     const [error, setError] = useState(null);
     const [progress, setProgress] = useState(0);
     const [statusMessage, setStatusMessage] = useState("");
+
+    // Track active candidate
+    const [appliedCandidateId, setAppliedCandidateId] = useState(null);
 
     const fetchCandidates = async () => {
         try {
@@ -30,6 +32,7 @@ export default function SolverDashboard({ scheduleId, onScheduleUpdated, onSelec
 
     const handleRunSolver = async () => {
         setLoading(true); setProgress(0); setStatusMessage("Initializing..."); setError(null);
+        setAppliedCandidateId(null);
         try {
             const response = await fetch(`/api/schedules/${scheduleId}/generate`, {
                 method: 'POST',
@@ -74,6 +77,7 @@ export default function SolverDashboard({ scheduleId, onScheduleUpdated, onSelec
         try {
             await axios.post(`/api/schedules/${scheduleId}/clear`);
             setCandidates([]);
+            setAppliedCandidateId(null);
             if (onScheduleUpdated) onScheduleUpdated();
         } catch (e) { setError("Failed to clear schedule."); } finally { setClearing(false); }
     };
@@ -82,16 +86,15 @@ export default function SolverDashboard({ scheduleId, onScheduleUpdated, onSelec
         setLoading(true);
         try {
             await axios.post(`/api/schedules/${scheduleId}/apply`, { candidate_id: candidateId });
-            setCandidates([]);
+            // 🟢 Set this so the UI updates
+            setAppliedCandidateId(candidateId);
             if (onScheduleUpdated) onScheduleUpdated();
         } catch (err) { setError("Failed to apply schedule."); } finally { setLoading(false); }
     };
 
     return (
         <Box sx={{ mt: 2 }}>
-            <Paper variant="outlined" sx={{
-                p: 3, textAlign: 'center', bgcolor: 'grey.50', border: '10px solid red', backgroundColor: 'yellow'
-            }}>
+            <Paper variant="outlined" sx={{ p: 3, textAlign: 'center', bgcolor: 'grey.50' }}>
                 <Box display="flex" justifyContent="center" alignItems="center" mb={2}>
                     <AutoAwesomeIcon color="primary" sx={{ mr: 1, fontSize: 30 }} />
                     <Typography variant="h6">AI Schedule Generator</Typography>
@@ -103,10 +106,7 @@ export default function SolverDashboard({ scheduleId, onScheduleUpdated, onSelec
 
                 {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
-                {/* 🟢 CHANGED LAYOUT: Fixed Flexbox Nesting */}
                 <Box display="flex" gap={2} mb={2}>
-
-                    {/* RUN BUTTON (Takes 70% width) */}
                     <Box sx={{ flex: 7 }}>
                         <Button
                             variant="contained"
@@ -115,16 +115,15 @@ export default function SolverDashboard({ scheduleId, onScheduleUpdated, onSelec
                             startIcon={loading ? <CircularProgress size={20} color="inherit" /> : <RefreshIcon />}
                             onClick={handleRunSolver}
                             disabled={loading || clearing}
-                            sx={{ height: '100%' }}
+                            sx={{ height: '100%', whiteSpace: 'nowrap' }}
                         >
                             {loading ? "Working..." : "Run Solver"}
                         </Button>
                     </Box>
 
-                    {/* CLEAR BUTTON (Takes 30% width) */}
                     <Box sx={{ flex: 3 }}>
                         <Tooltip title="Clear Unlocked Assignments">
-                            <span style={{ width: '100%' }}> {/* Span ensures Tooltip works even if disabled */}
+                            <span style={{ width: '100%', display: 'block', height: '100%' }}>
                                 <Button
                                     variant="outlined"
                                     color="error"
@@ -141,7 +140,6 @@ export default function SolverDashboard({ scheduleId, onScheduleUpdated, onSelec
                     </Box>
                 </Box>
 
-                {/* PROGRESS BAR */}
                 {loading && (
                     <Box sx={{ width: '100%', mt: 1 }}>
                         <Box display="flex" justifyContent="space-between" mb={1}>
@@ -153,25 +151,25 @@ export default function SolverDashboard({ scheduleId, onScheduleUpdated, onSelec
                 )}
             </Paper>
 
-            {/* CANDIDATE RESULTS */}
-            {
-                candidates.length > 0 && !loading && (
-                    <Box sx={{ mt: 4 }}>
-                        <Typography variant="subtitle1" fontWeight="bold" gutterBottom>Generated Options</Typography>
-                        <Stack direction="row" spacing={2} sx={{ overflowX: 'auto', pb: 2, px: 1 }}>
-                            {candidates.map((cand, index) => (
-                                <CandidateCard
-                                    key={cand.id}
-                                    candidate={cand}
-                                    isBest={index === 0}
-                                    onApply={handleApplyCandidate}
-                                    onSelectMember={onSelectMember} // <--- Pass it here
-                                />
-                            ))}
-                        </Stack>
-                    </Box>
-                )
-            }
-        </Box >
+            {candidates.length > 0 && !loading && (
+                <Box sx={{ mt: 4 }}>
+                    <Typography variant="subtitle1" fontWeight="bold" gutterBottom>Generated Options</Typography>
+                    <Stack direction="row" spacing={2} sx={{ overflowX: 'auto', pb: 2, px: 1 }}>
+                        {candidates.map((cand, index) => (
+                            <CandidateCard
+                                key={cand.id}
+                                candidate={cand}
+                                isBest={index === 0}
+                                isApplied={cand.id === appliedCandidateId}
+                                masterStations={masterStations}
+                                memberships={memberships} // 🟢 Pass data down
+                                onApply={handleApplyCandidate}
+                                onToggleHighlight={onToggleHighlight}
+                            />
+                        ))}
+                    </Stack>
+                </Box>
+            )}
+        </Box>
     );
 }

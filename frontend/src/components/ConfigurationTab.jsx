@@ -23,7 +23,7 @@ export default function ConfigurationTab({
     onOpenMemberConfig,
     onSaveSettings,
     onRefresh,
-    onToggleHighlight // 🟢 NEW PROP
+    onToggleHighlight
 }) {
 
     return (
@@ -99,7 +99,10 @@ export default function ConfigurationTab({
                     <SolverDashboard
                         scheduleId={summary?.id}
                         onScheduleUpdated={onRefresh}
-                        onToggleHighlight={onToggleHighlight} // 🟢 Pass prop to Dashboard
+                        onToggleHighlight={onToggleHighlight}
+                        masterStations={masterStations}
+                        // 🟢 PASS MEMBERSHIPS DOWN
+                        memberships={schedule?.memberships || []}
                     />
                 </Box>
             </Grid>

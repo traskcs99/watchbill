@@ -9,14 +9,23 @@ import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
 import axios from 'axios';
 import CandidateCard from './CandidateCard';
 
-// 🟢 UPDATE: Accepting onToggleHighlight prop
-export default function SolverDashboard({ scheduleId, onScheduleUpdated, onToggleHighlight }) {
+// 🟢 STEP 1: ADD 'memberships' TO PROPS HERE
+export default function SolverDashboard({
+    scheduleId,
+    onScheduleUpdated,
+    onToggleHighlight,
+    masterStations,
+    memberships = [] // <--- Default to empty array to prevent crash
+}) {
     const [loading, setLoading] = useState(false);
     const [clearing, setClearing] = useState(false);
     const [candidates, setCandidates] = useState([]);
     const [error, setError] = useState(null);
     const [progress, setProgress] = useState(0);
     const [statusMessage, setStatusMessage] = useState("");
+
+    // Track active candidate
+    const [appliedCandidateId, setAppliedCandidateId] = useState(null);
 
     const fetchCandidates = async () => {
         try {
@@ -29,6 +38,7 @@ export default function SolverDashboard({ scheduleId, onScheduleUpdated, onToggl
 
     const handleRunSolver = async () => {
         setLoading(true); setProgress(0); setStatusMessage("Initializing..."); setError(null);
+        setAppliedCandidateId(null);
         try {
             const response = await fetch(`/api/schedules/${scheduleId}/generate`, {
                 method: 'POST',
@@ -73,6 +83,7 @@ export default function SolverDashboard({ scheduleId, onScheduleUpdated, onToggl
         try {
             await axios.post(`/api/schedules/${scheduleId}/clear`);
             setCandidates([]);
+            setAppliedCandidateId(null);
             if (onScheduleUpdated) onScheduleUpdated();
         } catch (e) { setError("Failed to clear schedule."); } finally { setClearing(false); }
     };
@@ -81,7 +92,7 @@ export default function SolverDashboard({ scheduleId, onScheduleUpdated, onToggl
         setLoading(true);
         try {
             await axios.post(`/api/schedules/${scheduleId}/apply`, { candidate_id: candidateId });
-            setCandidates([]);
+            setAppliedCandidateId(candidateId);
             if (onScheduleUpdated) onScheduleUpdated();
         } catch (err) { setError("Failed to apply schedule."); } finally { setLoading(false); }
     };
@@ -89,17 +100,18 @@ export default function SolverDashboard({ scheduleId, onScheduleUpdated, onToggl
     return (
         <Box sx={{ mt: 2 }}>
             <Paper variant="outlined" sx={{ p: 3, textAlign: 'center', bgcolor: 'grey.50' }}>
+                {/* Header Section */}
                 <Box display="flex" justifyContent="center" alignItems="center" mb={2}>
                     <AutoAwesomeIcon color="primary" sx={{ mr: 1, fontSize: 30 }} />
                     <Typography variant="h6">AI Schedule Generator</Typography>
                 </Box>
-
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
                     The solver will generate 5 unique versions of the watchbill using your settings.
                 </Typography>
 
                 {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
+                {/* Buttons */}
                 <Box display="flex" gap={2} mb={2}>
                     <Box sx={{ flex: 7 }}>
                         <Button
@@ -114,7 +126,6 @@ export default function SolverDashboard({ scheduleId, onScheduleUpdated, onToggl
                             {loading ? "Working..." : "Run Solver"}
                         </Button>
                     </Box>
-
                     <Box sx={{ flex: 3 }}>
                         <Tooltip title="Clear Unlocked Assignments">
                             <span style={{ width: '100%', display: 'block', height: '100%' }}>
@@ -134,6 +145,7 @@ export default function SolverDashboard({ scheduleId, onScheduleUpdated, onToggl
                     </Box>
                 </Box>
 
+                {/* Progress Bar */}
                 {loading && (
                     <Box sx={{ width: '100%', mt: 1 }}>
                         <Box display="flex" justifyContent="space-between" mb={1}>
@@ -145,6 +157,7 @@ export default function SolverDashboard({ scheduleId, onScheduleUpdated, onToggl
                 )}
             </Paper>
 
+            {/* Candidates List */}
             {candidates.length > 0 && !loading && (
                 <Box sx={{ mt: 4 }}>
                     <Typography variant="subtitle1" fontWeight="bold" gutterBottom>Generated Options</Typography>
@@ -154,8 +167,14 @@ export default function SolverDashboard({ scheduleId, onScheduleUpdated, onToggl
                                 key={cand.id}
                                 candidate={cand}
                                 isBest={index === 0}
+                                isApplied={cand.id === appliedCandidateId}
+
+                                masterStations={masterStations}
+                                // 🟢 STEP 2: PASS IT DOWN
+                                memberships={memberships}
+
                                 onApply={handleApplyCandidate}
-                                onToggleHighlight={onToggleHighlight} // 🟢 Pass prop down
+                                onToggleHighlight={onToggleHighlight}
                             />
                         ))}
                     </Stack>

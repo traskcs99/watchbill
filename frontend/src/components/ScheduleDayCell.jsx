@@ -1,7 +1,9 @@
 import React, { memo, useMemo } from 'react';
 import { Box, Paper, Typography, Tooltip } from '@mui/material';
 import WarningIcon from '@mui/icons-material/Warning';
-// Import the calculator
+import LockIcon from '@mui/icons-material/Lock'; // 🟢 1. IMPORT LOCK ICON
+
+// Import the calculator (Ensure this path matches your file structure)
 import { calculateSlotAvailability } from '../utils/availabilityCalculator';
 
 const ScheduleDayCell = memo(({
@@ -20,13 +22,17 @@ const ScheduleDayCell = memo(({
     // Interaction & Validation Props
     isSelected,
     onInspect,
-    dayAlerts = [],         // 🟢 NEW
-    highlightedMemberId     // 🟢 NEW
+    dayAlerts = [],
+    highlightedMemberId,
+    onToggleLock            // 🟢 2. RECEIVE TOGGLE PROP
 }) => {
+    // Safety check
+    if (!day) return null;
+
     const isHoliday = day.is_holiday;
     const isLookback = day.is_lookback;
 
-    // 🟢 1. Check for Conflicts on this Day
+    // 1. Check for Conflicts on this Day
     const hasIssues = dayAlerts.length > 0;
     const badAssignmentIds = useMemo(() => {
         const ids = new Set();
@@ -34,8 +40,7 @@ const ScheduleDayCell = memo(({
         return ids;
     }, [dayAlerts]);
 
-    // 🟢 2. Check Highlighting Status
-    // Is the highlighted person excluded on THIS specific day?
+    // 2. Check Highlighting Status
     const isHighlightedExcluded = highlightedMemberId && exclusions.some(e => e.membership_id === highlightedMemberId);
 
     // 3. Memoized Styles
@@ -105,7 +110,7 @@ const ScheduleDayCell = memo(({
             elevation={isLookback ? 0 : (isHoliday ? 3 : 1)}
             onClick={() => onInspect(day)}
             sx={{
-                minHeight: 250,
+                minHeight: 180, // Slightly taller to fit content comfortably
                 p: 1,
                 cursor: isLookback ? 'default' : 'pointer',
                 border: '1px solid',
@@ -133,7 +138,7 @@ const ScheduleDayCell = memo(({
                     {dayNumber}
                 </Typography>
 
-                {/* 🟢 Validation Icon */}
+                {/* Validation Icon */}
                 {hasIssues && (
                     <Tooltip title={`${dayAlerts.length} Conflicts`}>
                         <WarningIcon color="error" fontSize="small" />
@@ -147,12 +152,13 @@ const ScheduleDayCell = memo(({
                     const assign = assignments.find(a => a.station_id === st.station_id);
                     const hasAssignment = !!assign?.assigned_person_name;
 
-                    // 🟢 HIGHLIGHTING LOGIC
+                    // Logic
                     const isTarget = highlightedMemberId && assign?.membership_id === highlightedMemberId;
                     const isDimmed = highlightedMemberId && !isTarget; // Dim if highlighting someone else
                     const isBad = assign && badAssignmentIds.has(assign.id); // Red if conflict
+                    const isLocked = assign?.is_locked; // 🟢 3. CHECK LOCK STATUS
 
-                    // --- CALCULATOR LOGIC (Preserved) ---
+                    // --- CALCULATOR LOGIC ---
                     let displayValue = "-";
                     let availScore = 0;
 
@@ -166,11 +172,11 @@ const ScheduleDayCell = memo(({
                     }
 
                     // --- COLOR LOGIC ---
-                    let boxColor = '#e8f5e9'; // Default Green
+                    let boxColor = '#e8f5e9'; // Default Green (High Availability)
                     let textColor = '#2e7d32';
                     let borderColor = '#c8e6c9';
 
-                    // 1. Conflict Color (Red)
+                    // 1. Conflict Color (Red) - Overrides everything
                     if (isBad) {
                         boxColor = '#ffebee'; textColor = '#c62828'; borderColor = '#ef9a9a';
                     }
@@ -182,12 +188,18 @@ const ScheduleDayCell = memo(({
                             boxColor = '#fff3e0'; textColor = '#ef6c00'; borderColor = '#ffcc80';
                         }
                     }
-                    // 3. Standard Assignment Color (Blue)
+                    // 3. Assignment Color (Blue or Grey)
                     else if (hasAssignment) {
-                        boxColor = '#e3f2fd'; textColor = '#1565c0'; borderColor = '#bbdefb';
+                        // 🟢 4. HANDLE LOCKED COLOR
+                        if (isLocked) {
+                            boxColor = '#eeeeee'; textColor = '#616161'; borderColor = '#bdbdbd';
+                        } else {
+                            boxColor = '#e3f2fd'; textColor = '#1565c0'; borderColor = '#bbdefb';
+                        }
                     }
 
-                    // 🟢 4. OVERRIDE: Highlighting Target (Solid Blue Glow)
+                    // 4. OVERRIDE: Highlighting Target (Solid Blue Glow)
+                    // Highlights usually supersede lock visuals to show "Found it!"
                     if (isTarget) {
                         boxColor = '#1976d2';
                         textColor = '#ffffff';
@@ -203,8 +215,6 @@ const ScheduleDayCell = memo(({
                                 justifyContent: 'space-between',
                                 borderBottom: '1px solid #f5f5f5',
                                 pb: 0.3,
-
-                                // 🟢 Dimming Effect
                                 opacity: isLookback ? 0.6 : (isDimmed ? 0.3 : 1),
                                 transition: 'opacity 0.2s',
                             }}
@@ -221,18 +231,33 @@ const ScheduleDayCell = memo(({
                                 {st.abbr}:
                             </Typography>
 
-                            <Box sx={{
-                                bgcolor: isLookback ? '#f5f5f5' : boxColor,
-                                color: isLookback ? '#9e9e9e' : textColor,
-                                border: '1px solid',
-                                borderColor: isLookback ? '#e0e0e0' : borderColor,
-                                borderRadius: '4px', px: 0.8, py: 0.1, minWidth: '45px', textAlign: 'right', display: 'flex', justifyContent: 'center',
+                            <Box
+                                // 🟢 5. ADD CLICK HANDLER FOR LOCK TOGGLE
+                                onClick={(e) => {
+                                    e.stopPropagation(); // Stop clicking the Day Cell
+                                    if (hasAssignment && onToggleLock) {
+                                        onToggleLock(assign.id);
+                                    }
+                                }}
+                                sx={{
+                                    bgcolor: isLookback ? '#f5f5f5' : boxColor,
+                                    color: isLookback ? '#9e9e9e' : textColor,
+                                    border: '1px solid',
+                                    borderColor: isLookback ? '#e0e0e0' : borderColor,
+                                    borderRadius: '4px', px: 0.8, py: 0.1, minWidth: '45px', textAlign: 'right',
+                                    display: 'flex', justifyContent: 'center', alignItems: 'center',
 
-                                // 🟢 Active Glow Transformation
-                                transform: isTarget ? 'scale(1.05)' : 'none',
-                                boxShadow: isTarget ? '0 2px 4px rgba(25, 118, 210, 0.4)' : 'none',
-                                fontWeight: isTarget ? 700 : 'normal'
-                            }}>
+                                    cursor: hasAssignment ? 'pointer' : 'default', // Show pointer if clickable
+
+                                    // Active Glow Transformation
+                                    transform: isTarget ? 'scale(1.05)' : 'none',
+                                    boxShadow: isTarget ? '0 2px 4px rgba(25, 118, 210, 0.4)' : 'none',
+                                    fontWeight: isTarget ? 700 : 'normal'
+                                }}
+                            >
+                                {/* 🟢 6. RENDER LOCK ICON */}
+                                {isLocked && <LockIcon sx={{ fontSize: 10, mr: 0.5, opacity: 0.7 }} />}
+
                                 <Typography sx={{ fontSize: '0.65rem', fontWeight: 700, lineHeight: 1.2 }}>
                                     {displayValue}
                                 </Typography>
@@ -242,7 +267,7 @@ const ScheduleDayCell = memo(({
                 })}
             </Box>
 
-            {/* LEAVE FOOTER (Preserved) */}
+            {/* LEAVE FOOTER */}
             <Box sx={{ mt: 1, mb: 1, minHeight: '20px' }}>
                 {leaves.length > 0 && (
                     <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 0.5 }}>
@@ -262,14 +287,12 @@ const ScheduleDayCell = memo(({
                 )}
             </Box>
 
-            {/* EXCLUSION FOOTER (Preserved) */}
+            {/* EXCLUSION FOOTER */}
             {exclusions.length > 0 && (
                 <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 0.5 }}>
                     <Typography sx={{ fontSize: '0.55rem', fontWeight: 900, color: 'text.disabled' }}>EX:</Typography>
                     {exclusions.map((ex, i) => {
-                        // 🟢 Highlight specific exclusion if selected
                         const isExclusionTarget = highlightedMemberId && ex.membership_id === highlightedMemberId;
-
                         return (
                             <Box key={i} sx={{
                                 bgcolor: isExclusionTarget ? '#ffebee' : '#f5f5f5',
@@ -285,15 +308,13 @@ const ScheduleDayCell = memo(({
                 </Box>
             )}
 
-            {/* FIXED FOOTER (Preserved) */}
+            {/* FIXED FOOTER */}
             <Box sx={{ borderTop: '1px solid #eee', pt: 0.5, mt: 'auto', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
-                {/* 🟢 REVERTED: Standard wrapping allowed here */}
                 <Typography variant="caption" sx={{
                     fontSize: '0.6rem',
                     fontWeight: isLookback ? 400 : (isHoliday ? 900 : 500),
                     color: isLookback ? 'text.disabled' : 'text.secondary',
                     textTransform: 'uppercase',
-                    // maxWidth removed, noWrap removed
                 }}>
                     {isLookback ? 'Historical' : day.name}
                 </Typography>

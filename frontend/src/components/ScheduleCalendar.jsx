@@ -12,7 +12,8 @@ export default function ScheduleCalendar({
     memberships,
     requiredStations,
     alerts,
-    highlightedMemberId
+    highlightedMemberId,
+    onToggleLock // 🟢 Ensure this is passed down
 }) {
     return (
         <Box sx={{
@@ -29,25 +30,27 @@ export default function ScheduleCalendar({
                     day={day}
                     isSelected={day.id === selectedDayId}
 
-                    // Interaction
+                    // Actions
                     onInspect={() => onSelectDay(day)}
+                    onToggleLock={onToggleLock}
 
-                    // Data
+                    // Data Slices
                     assignments={assignments.filter(a => a.day_id === day.id)}
-
-                    // 🟢 FIX 1: Filter Leaves by Date (assuming leaves_exploded has a date string)
-                    // If your leaves logic relies on date strings:
                     leaves={leaves.filter(l => l.date === day.date)}
-
-                    // 🟢 FIX 2: Filter Exclusions by Day ID
                     exclusions={exclusions.filter(e => e.day_id === day.id)}
 
+                    // Globals
                     memberships={memberships}
                     requiredStations={requiredStations}
 
-                    // Validation & Highlights
+                    // Validation
                     dayAlerts={alerts ? alerts.filter(a => a.day_id === day.id) : []}
                     highlightedMemberId={highlightedMemberId}
+
+                    // Pass full arrays for calculator if needed
+                    allAssignments={assignments}
+                    allExclusions={exclusions}
+                    allDays={days}
                 />
             ))}
         </Box>

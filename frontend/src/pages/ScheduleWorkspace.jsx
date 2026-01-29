@@ -20,7 +20,6 @@ import AlertsList from '../components/AlertsList';
 import MemberConfigDialog from '../components/MemberConfigDialog';
 import MemberPickerDialog from '../components/MemberPickerDialog';
 
-// Helper for Accessibility Props
 function a11yProps(index) {
     return {
         id: `simple-tab-${index}`,
@@ -139,6 +138,29 @@ export default function ScheduleWorkspace() {
         setHighlightedMemberId(prev => prev === memberId ? null : memberId);
     }, []);
 
+    // 🟢 NEW: Lock Toggle Handler
+    const handleToggleLock = useCallback(async (assignmentId) => {
+        const target = assignments.find(a => a.id === assignmentId);
+        if (!target) return;
+
+        // Optimistic Update (optional, but UI feels faster)
+        setAssignments(prev => prev.map(a => a.id === assignmentId ? { ...a, is_locked: !a.is_locked } : a));
+
+        try {
+            await fetch(`/api/assignments/${assignmentId}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ is_locked: !target.is_locked })
+            });
+            // We refresh just to be safe, but optimistic update handles the visual
+            refreshOperationalData();
+        } catch (err) {
+            console.error(err);
+            refreshOperationalData(); // Revert on error
+        }
+    }, [assignments, refreshOperationalData]);
+
+
     const handleAddStation = async (stationId) => {
         const res = await fetch(`/api/schedules/${scheduleId}/stations`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ station_id: stationId }) });
         if (res.ok) { setIsStationDialogOpen(false); fetchData(); }
@@ -226,7 +248,7 @@ export default function ScheduleWorkspace() {
 
             <Box sx={{ display: 'flex', gap: 1, flexGrow: 1, overflow: 'hidden' }}>
 
-                {/* CALENDAR (Flex 1) */}
+                {/* CALENDAR */}
                 <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                     <ScheduleCalendar
                         days={days}
@@ -239,13 +261,15 @@ export default function ScheduleWorkspace() {
                         requiredStations={schedule?.required_stations || []}
                         alerts={alerts}
                         highlightedMemberId={highlightedMemberId}
+                        // 🟢 PASSED DOWN HERE
+                        onToggleLock={handleToggleLock}
                     />
                 </Box>
 
-                {/* 🟢 RIGHT PANEL - INCREASED WIDTH TO 550px */}
+                {/* RIGHT PANEL */}
                 <Paper
                     sx={{
-                        width: '550px', // <-- Increased from 440px
+                        width: '550px',
                         flexShrink: 0,
                         display: 'flex',
                         flexDirection: 'column',
