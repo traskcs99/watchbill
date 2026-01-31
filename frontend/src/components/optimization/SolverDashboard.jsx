@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
     Box, Button, Typography, Paper, CircularProgress,
     Stack, Alert, LinearProgress, Tooltip
@@ -9,13 +9,15 @@ import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
 import axios from 'axios';
 import CandidateCard from './CandidateCard';
 
-// 🟢 STEP 1: ADD 'memberships' TO PROPS HERE
 export default function SolverDashboard({
     scheduleId,
     onScheduleUpdated,
     onToggleHighlight,
     masterStations,
-    memberships = [] // <--- Default to empty array to prevent crash
+    memberships = [],
+    days = [],
+    // 🟢 CRITICAL: This prop triggers the "Yellow/Modified" state
+    scheduleUpdatedAt
 }) {
     const [loading, setLoading] = useState(false);
     const [clearing, setClearing] = useState(false);
@@ -24,8 +26,46 @@ export default function SolverDashboard({
     const [progress, setProgress] = useState(0);
     const [statusMessage, setStatusMessage] = useState("");
 
-    // Track active candidate
-    const [appliedCandidateId, setAppliedCandidateId] = useState(null);
+    // 🟢 STATE: Track Active Candidate and Modification Status
+    const [activeCandidateId, setActiveCandidateId] = useState(null);
+    const [isModified, setIsModified] = useState(false);
+
+    // Track if WE caused the update (to prevent turning yellow immediately)
+    const isApplyingRef = useRef(false);
+
+    // 🟢 1. LOAD STATE FROM STORAGE ON MOUNT (Fixes the reset issue)
+    useEffect(() => {
+        if (!scheduleId) return;
+        const savedId = localStorage.getItem(`activeCandidate_${scheduleId}`);
+        if (savedId) {
+            console.log("Restoring Active Candidate:", savedId);
+            setActiveCandidateId(Number(savedId));
+        }
+    }, [scheduleId]);
+
+    // 🟢 2. DETECT MANUAL CHANGES
+    useEffect(() => {
+        // If the schedule data is missing, do nothing
+        if (!scheduleUpdatedAt) return;
+
+        // If we are currently applying a candidate, ignore this update (it's ours)
+        if (isApplyingRef.current) {
+            console.log("Update caused by Apply - Keeping Blue state");
+            isApplyingRef.current = false; // Reset flag
+            return;
+        }
+
+        // If we have an active candidate and the schedule refreshed from the outside...
+        if (activeCandidateId !== null) {
+            console.log("External Update Detected - Switching to Yellow state");
+            setIsModified(true);
+        }
+    }, [scheduleUpdatedAt]); // 🟢 This now fires whenever the 'schedule' object changes
+
+    // Filter Active Days
+    const activeDayIds = useMemo(() => {
+        return days.filter(d => !d.is_lookback).map(d => d.id);
+    }, [days]);
 
     const fetchCandidates = async () => {
         try {
@@ -38,7 +78,12 @@ export default function SolverDashboard({
 
     const handleRunSolver = async () => {
         setLoading(true); setProgress(0); setStatusMessage("Initializing..."); setError(null);
-        setAppliedCandidateId(null);
+
+        // Reset State on new run
+        setActiveCandidateId(null);
+        setIsModified(false);
+        localStorage.removeItem(`activeCandidate_${scheduleId}`);
+
         try {
             const response = await fetch(`/api/schedules/${scheduleId}/generate`, {
                 method: 'POST',
@@ -80,27 +125,45 @@ export default function SolverDashboard({
     const handleClearSchedule = async () => {
         if (!window.confirm("Are you sure? This removes all unlocked assignments.")) return;
         setClearing(true);
+
+        // Reset State
+        setActiveCandidateId(null);
+        setIsModified(false);
+        localStorage.removeItem(`activeCandidate_${scheduleId}`);
+
         try {
             await axios.post(`/api/schedules/${scheduleId}/clear`);
             setCandidates([]);
-            setAppliedCandidateId(null);
             if (onScheduleUpdated) onScheduleUpdated();
         } catch (e) { setError("Failed to clear schedule."); } finally { setClearing(false); }
     };
 
     const handleApplyCandidate = async (candidateId) => {
         setLoading(true);
+
+        // 🟢 SET FLAG: We are about to update the schedule
+        isApplyingRef.current = true;
+
         try {
             await axios.post(`/api/schedules/${scheduleId}/apply`, { candidate_id: candidateId });
-            setAppliedCandidateId(candidateId);
+
+            console.log("Applied Candidate:", candidateId);
+
+            // 🟢 UPDATE STATE & SAVE
+            setActiveCandidateId(candidateId);
+            setIsModified(false);
+            localStorage.setItem(`activeCandidate_${scheduleId}`, candidateId);
+
             if (onScheduleUpdated) onScheduleUpdated();
-        } catch (err) { setError("Failed to apply schedule."); } finally { setLoading(false); }
+        } catch (err) {
+            setError("Failed to apply schedule.");
+            isApplyingRef.current = false; // Reset on error
+        } finally { setLoading(false); }
     };
 
     return (
         <Box sx={{ mt: 2 }}>
             <Paper variant="outlined" sx={{ p: 3, textAlign: 'center', bgcolor: 'grey.50' }}>
-                {/* Header Section */}
                 <Box display="flex" justifyContent="center" alignItems="center" mb={2}>
                     <AutoAwesomeIcon color="primary" sx={{ mr: 1, fontSize: 30 }} />
                     <Typography variant="h6">AI Schedule Generator</Typography>
@@ -111,7 +174,6 @@ export default function SolverDashboard({
 
                 {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
-                {/* Buttons */}
                 <Box display="flex" gap={2} mb={2}>
                     <Box sx={{ flex: 7 }}>
                         <Button
@@ -145,7 +207,6 @@ export default function SolverDashboard({
                     </Box>
                 </Box>
 
-                {/* Progress Bar */}
                 {loading && (
                     <Box sx={{ width: '100%', mt: 1 }}>
                         <Box display="flex" justifyContent="space-between" mb={1}>
@@ -157,26 +218,37 @@ export default function SolverDashboard({
                 )}
             </Paper>
 
-            {/* Candidates List */}
             {candidates.length > 0 && !loading && (
                 <Box sx={{ mt: 4 }}>
                     <Typography variant="subtitle1" fontWeight="bold" gutterBottom>Generated Options</Typography>
-                    <Stack direction="row" spacing={2} sx={{ overflowX: 'auto', pb: 2, px: 1 }}>
-                        {candidates.map((cand, index) => (
-                            <CandidateCard
-                                key={cand.id}
-                                candidate={cand}
-                                isBest={index === 0}
-                                isApplied={cand.id === appliedCandidateId}
+                    <Stack direction="row" spacing={2} sx={{ overflowX: 'auto', pb: 2, px: 1, pt: 2 }}>
+                        {candidates.map((cand, index) => {
+                            // 🟢 DETERMINE STATUS FOR CARD
+                            let status = 'none';
 
-                                masterStations={masterStations}
-                                // 🟢 STEP 2: PASS IT DOWN
-                                memberships={memberships}
+                            // Ensure type safety (IDs might be string vs number)
+                            if (String(cand.id) === String(activeCandidateId)) {
+                                status = isModified ? 'changes' : 'displayed';
+                            }
 
-                                onApply={handleApplyCandidate}
-                                onToggleHighlight={onToggleHighlight}
-                            />
-                        ))}
+                            return (
+                                <CandidateCard
+                                    key={cand.id}
+                                    candidate={cand}
+                                    isBest={index === 0}
+
+                                    // 🟢 PASS STATUS
+                                    displayStatus={status}
+
+                                    masterStations={masterStations}
+                                    memberships={memberships}
+                                    activeDayIds={activeDayIds}
+
+                                    onApply={handleApplyCandidate}
+                                    onToggleHighlight={onToggleHighlight}
+                                />
+                            );
+                        })}
                     </Stack>
                 </Box>
             )}

@@ -10,7 +10,7 @@ import SolverDashboard from './optimization/SolverDashboard';
 
 export default function ConfigurationTab({
     summary,
-    schedule,
+    schedule, // <--- This object contains .days
     groups,
     masterStations,
     onRemoveStation,
@@ -101,8 +101,9 @@ export default function ConfigurationTab({
                         onScheduleUpdated={onRefresh}
                         onToggleHighlight={onToggleHighlight}
                         masterStations={masterStations}
-                        // 🟢 PASS MEMBERSHIPS DOWN
                         memberships={schedule?.memberships || []}
+                        scheduleUpdatedAt={schedule}
+                        days={schedule?.days || []}
                     />
                 </Box>
             </Grid>

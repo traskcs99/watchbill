@@ -7,10 +7,10 @@ import {
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import CheckIcon from '@mui/icons-material/Check';
 import VisibilityIcon from '@mui/icons-material/Visibility';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 
-// 🟢 1. PENALTY LABEL MAPPING
 const PENALTY_LABELS = {
-    "goal_deviation": "Station Goals", // <--- This is the one for Station Weights
+    "goal_deviation": "Station Goals",
     "quota_deviation": "Shift Quota",
     "spacing": "Spacing Violation",
     "consecutive_work": "Consecutive Days",
@@ -21,9 +21,13 @@ const PENALTY_LABELS = {
 export default function CandidateCard({
     candidate,
     isBest,
-    isApplied,
+
+    // 🟢 NEW: 3-Way State ('displayed', 'changes', 'none')
+    displayStatus = 'none',
+
     masterStations = [],
     memberships = [],
+    activeDayIds = [],
     onApply,
     onToggleHighlight
 }) {
@@ -39,9 +43,14 @@ export default function CandidateCard({
         if (!candidate.assignments_data) return data;
 
         Object.entries(candidate.assignments_data).forEach(([key, memberId]) => {
-            const stationId = key.split('_')[1];
-            const st = masterStations.find(s => String(s.id) === String(stationId));
-            const stName = st ? st.abbr : `Stn ${stationId}`;
+            const [dayIdStr, stationIdStr] = key.split('_');
+            const dayId = Number(dayIdStr);
+
+            // Filter Lookback
+            if (activeDayIds.length > 0 && !activeDayIds.includes(dayId)) return;
+
+            const st = masterStations.find(s => String(s.id) === String(stationIdStr));
+            const stName = st ? st.abbr : `Stn ${stationIdStr}`;
 
             if (!data[memberId]) data[memberId] = { total: 0, stations: {} };
 
@@ -49,20 +58,17 @@ export default function CandidateCard({
             data[memberId].stations[stName] = (data[memberId].stations[stName] || 0) + 1;
         });
         return data;
-    }, [candidate.assignments_data, masterStations]);
+    }, [candidate.assignments_data, masterStations, activeDayIds]);
 
-    // 2. HELPER: Get Weight Config Details
+    // 2. HELPER: Get Weight Details
     const getWeightDetails = (memberId, stationName) => {
-        // Force String comparison
         const member = memberships.find(m => String(m.id) === String(memberId));
         if (!member) return { goalPct: 0, rawWeight: 0 };
 
-        // 1. Find Station ID
         const station = masterStations.find(s => s.abbr === stationName);
         if (!station) return { goalPct: 0, rawWeight: 0 };
         const stationId = station.id;
 
-        // 2. Parse Weights
         const rawWeights = member.station_weights || [];
         let weightMap = {};
         if (Array.isArray(rawWeights)) {
@@ -73,7 +79,6 @@ export default function CandidateCard({
             });
         }
 
-        // 3. Calculate Totals
         let qualIds = [];
         if (Array.isArray(member.qualifications)) {
             qualIds = member.qualifications.map(q => (typeof q === 'object' && q !== null) ? Number(q.station_id) : Number(q));
@@ -84,7 +89,6 @@ export default function CandidateCard({
 
         masterStations.forEach(mst => {
             if (qualIds.includes(mst.id)) {
-                // Default to 1.0 if not found
                 const w = weightMap[mst.id] !== undefined ? weightMap[mst.id] : 1.0;
                 totalWeight += w;
                 if (mst.id === stationId) targetWeight = w;
@@ -92,12 +96,24 @@ export default function CandidateCard({
         });
 
         const goalPct = totalWeight > 0 ? Math.round((targetWeight / totalWeight) * 100) : 0;
-
         return {
             goalPct,
             rawWeight: weightMap[stationId] !== undefined ? weightMap[stationId] : 1.0
         };
     };
+
+    // 🟢 VISUAL STYLES BASED ON STATUS
+    const isDisplayed = displayStatus === 'displayed';
+    const isModified = displayStatus === 'changes';
+
+    let borderColor = '#ddd'; // Default
+    if (isDisplayed) borderColor = '#0288d1'; // Info Blue
+    if (isModified) borderColor = '#ed6c02'; // Warning Yellow
+    if (!isDisplayed && !isModified && isBest) borderColor = '#1976d2'; // Best Blue
+
+    let bgColor = 'white';
+    if (isDisplayed) bgColor = '#e1f5fe';
+    if (isModified) bgColor = '#fff3e0';
 
     return (
         <Card
@@ -106,33 +122,44 @@ export default function CandidateCard({
                 width: '100%',
                 minWidth: 0,
                 flexShrink: 0,
-                border: isApplied ? '2px solid #2e7d32' : (isBest ? '2px solid #1976d2' : '1px solid #ddd'),
-                bgcolor: isApplied ? '#f1f8e9' : 'white',
+                border: `2px solid ${borderColor}`,
+                bgcolor: bgColor,
                 position: 'relative',
                 display: 'flex',
                 flexDirection: 'column',
                 transition: 'all 0.2s',
-                boxShadow: isApplied ? '0 4px 12px rgba(46, 125, 50, 0.2)' : 'none'
+                boxShadow: (isDisplayed || isModified) ? '0 4px 12px rgba(0,0,0, 0.15)' : 'none'
             }}
         >
-            {isApplied ? (
+            {/* 🟢 TOP PILL INDICATOR */}
+            {isDisplayed && (
                 <Chip
-                    label="Displayed"
-                    color="success"
-                    icon={<VisibilityIcon style={{ fontSize: 14 }} />}
+                    label="DISPLAYED"
+                    color="info"
+                    icon={<VisibilityIcon style={{ fontSize: 16 }} />}
                     size="small"
-                    sx={{ position: 'absolute', top: 10, right: 10, fontSize: '0.7rem', height: 20, fontWeight: 'bold' }}
+                    sx={{ position: 'absolute', top: -10, right: 10, fontSize: '0.7rem', height: 24, fontWeight: 'bold', border: '1px solid white' }}
                 />
-            ) : isBest ? (
+            )}
+            {isModified && (
                 <Chip
-                    label="Best"
+                    label="CHANGES"
+                    color="warning"
+                    icon={<WarningAmberIcon style={{ fontSize: 16 }} />}
+                    size="small"
+                    sx={{ position: 'absolute', top: -10, right: 10, fontSize: '0.7rem', height: 24, fontWeight: 'bold', border: '1px solid white' }}
+                />
+            )}
+            {!isDisplayed && !isModified && isBest && (
+                <Chip
+                    label="Best Score"
                     color="primary"
                     size="small"
                     sx={{ position: 'absolute', top: 10, right: 10, fontSize: '0.7rem', height: 20 }}
                 />
-            ) : null}
+            )}
 
-            <CardContent sx={{ flexGrow: 1, p: 1.5, '&:last-child': { pb: 2 } }}>
+            <CardContent sx={{ flexGrow: 1, p: 1.5, '&:last-child': { pb: 2 }, pt: (isDisplayed || isModified) ? 2.5 : 1.5 }}>
                 <Box mb={1} pr={4}>
                     <Typography variant="subtitle1" component="div" sx={{ fontWeight: 'bold', lineHeight: 1.2 }}>
                         Score: {Number(candidate.score || 0).toFixed(0)}
@@ -159,11 +186,10 @@ export default function CandidateCard({
                             {rows.map((row) => {
                                 const stats = assignmentBreakdown[row.member_id] || { total: 0, stations: {} };
 
-                                // BREAKDOWN TOOLTIP (Shifts)
                                 const breakdownTooltip = (
                                     <Box sx={{ p: 0.5, minWidth: 180 }}>
                                         <Typography variant="caption" fontWeight="bold" display="block" sx={{ borderBottom: '1px solid rgba(255,255,255,0.2)', mb: 0.5 }}>
-                                            Actual vs Goal
+                                            Actual vs Goal (Active)
                                         </Typography>
                                         {Object.entries(stats.stations).map(([stName, count]) => {
                                             const pct = stats.total > 0 ? Math.round((count / stats.total) * 100) : 0;
@@ -186,11 +212,10 @@ export default function CandidateCard({
                                                 </Box>
                                             );
                                         })}
-                                        {stats.total === 0 && <Typography variant="caption">No shifts</Typography>}
+                                        {stats.total === 0 && <Typography variant="caption">No active shifts</Typography>}
                                     </Box>
                                 );
 
-                                // 🟢 2. PENALTY TOOLTIP (Updated)
                                 const penaltyTooltip = (
                                     <Box sx={{ p: 0.5, minWidth: 140 }}>
                                         <Typography variant="caption" fontWeight="bold" display="block" sx={{ mb: 0.5, borderBottom: '1px solid #fff' }}>
@@ -198,27 +223,15 @@ export default function CandidateCard({
                                         </Typography>
                                         {row.breakdown && Object.keys(row.breakdown).length > 0 ? (
                                             Object.entries(row.breakdown).map(([reason, pts]) => {
-                                                // Map backend key to nice name
                                                 const label = PENALTY_LABELS[reason] || reason;
-                                                // Highlight "Station Goal" penalty
                                                 const isGoalPenalty = reason === 'goal_deviation';
 
                                                 return (
                                                     <Box key={reason} display="flex" justifyContent="space-between" gap={2} sx={{ mb: 0.2 }}>
-                                                        <Typography
-                                                            variant="caption"
-                                                            sx={{
-                                                                color: isGoalPenalty ? '#ffcc80' : 'inherit', // Orange for Goal
-                                                                fontWeight: isGoalPenalty ? 'bold' : 'normal'
-                                                            }}
-                                                        >
+                                                        <Typography variant="caption" sx={{ color: isGoalPenalty ? '#ffcc80' : 'inherit', fontWeight: isGoalPenalty ? 'bold' : 'normal' }}>
                                                             {label}:
                                                         </Typography>
-                                                        <Typography
-                                                            variant="caption"
-                                                            fontWeight="bold"
-                                                            sx={{ color: isGoalPenalty ? '#ffcc80' : 'inherit' }}
-                                                        >
+                                                        <Typography variant="caption" fontWeight="bold" sx={{ color: isGoalPenalty ? '#ffcc80' : 'inherit' }}>
                                                             {pts}
                                                         </Typography>
                                                     </Box>
@@ -246,7 +259,7 @@ export default function CandidateCard({
                                         <TableCell align="center" sx={{ fontSize: '0.7rem' }}>
                                             <Tooltip title={breakdownTooltip} arrow placement="left" TransitionComponent={Zoom}>
                                                 <span style={{ cursor: 'help', textDecoration: 'underline dotted', textDecorationColor: '#ccc' }}>
-                                                    {row.assigned}
+                                                    {stats.total}
                                                 </span>
                                             </Tooltip>
                                         </TableCell>
@@ -262,7 +275,7 @@ export default function CandidateCard({
                                         <TableCell align="center" sx={{ fontSize: '0.7rem', color: 'text.secondary' }}>
                                             <Tooltip title={penaltyTooltip} arrow TransitionComponent={Zoom} placement="left">
                                                 <span style={{ cursor: 'help' }}>
-                                                    {Number(row.goat_points || 0).toFixed(0)}
+                                                    {Number(row.goat_points || 0).toFixed(1)}
                                                 </span>
                                             </Tooltip>
                                         </TableCell>
@@ -276,18 +289,18 @@ export default function CandidateCard({
 
             <Box sx={{ p: 1.5, pt: 0 }}>
                 <Button
-                    variant={isApplied ? "contained" : (isBest ? "contained" : "outlined")}
-                    color={isApplied ? "success" : "primary"}
+                    variant={isDisplayed ? "contained" : "outlined"}
+                    color={isDisplayed ? "info" : (isModified ? "warning" : "primary")}
                     fullWidth
                     size="small"
                     onClick={(e) => {
                         e.stopPropagation();
                         onApply(candidate.id);
                     }}
-                    startIcon={isApplied ? <CheckIcon /> : <CheckCircleIcon />}
-                    disabled={isApplied}
+                    startIcon={isDisplayed ? <CheckIcon /> : <CheckCircleIcon />}
+                    disabled={isDisplayed} // Disable button if already displayed (prevents re-click)
                 >
-                    {isApplied ? "Displayed" : "Apply Schedule"}
+                    {isDisplayed ? "Active Schedule" : (isModified ? "Re-Apply" : "Apply Schedule")}
                 </Button>
             </Box>
         </Card>

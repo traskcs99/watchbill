@@ -60,6 +60,9 @@ def run_schedule_optimization(schedule_id: int, num_candidates: int = 5):
     days = db.session.scalars(stmt_days).all()
     active_days = [d for d in days if not d.is_lookback]
 
+    # 🟢 NEW: Create a set of Active Day IDs for O(1) filtering later
+    active_day_ids = {d.id for d in active_days}
+
     # Fetch Members
     stmt_members = (
         select(ScheduleMembership)
@@ -75,8 +78,7 @@ def run_schedule_optimization(schedule_id: int, num_candidates: int = 5):
     locked_assignments = db.session.scalars(stmt_locks).all()
     locked_map = {(a.day_id, a.station_id): a.membership_id for a in locked_assignments}
 
-    # 🟢 FETCH HISTORY (Assignments including Lookback)
-    # We need to know who worked on the lookback days to enforce spacing.
+    # FETCH HISTORY (Assignments including Lookback)
     stmt_history = (
         select(Assignment)
         .join(ScheduleDay)
@@ -85,8 +87,6 @@ def run_schedule_optimization(schedule_id: int, num_candidates: int = 5):
         .options(joinedload(Assignment.day))
     )
     history_records = db.session.scalars(stmt_history).all()
-
-    # Map: (member_id, date_obj) -> True
     history_work_map = {(a.membership_id, a.day.date) for a in history_records}
 
     stations = schedule.required_stations
@@ -144,25 +144,7 @@ def run_schedule_optimization(schedule_id: int, num_candidates: int = 5):
 
     if unfillable_slots:
         bad_day, bad_station, bad_st_name = unfillable_slots[0]
-        details = []
-        for m in members:
-            reason = "Unknown"
-            if is_member_on_leave(m, bad_day.date):
-                reason = "On Leave"
-            else:
-                q_ids = {int(q.station_id) for q in m.person.qualifications}
-                if int(bad_station.station_id) not in q_ids:
-                    reason = f"Not Qualified (Has {list(q_ids)}, Needs {bad_station.station_id})"
-                else:
-                    reason = "Valid (Logic Error?)"
-            details.append(f"{m.person.name}: {reason}")
-
-        error_msg = (
-            f"Infeasible! No one can work {bad_day.date} ({bad_st_name}).\n"
-            f"Analysis of staff:\n" + "\n".join(details[:10])
-        )
-        if len(details) > 10:
-            error_msg += "\n...and others."
+        error_msg = f"Infeasible! No one can work {bad_day.date} ({bad_st_name})."
         yield json.dumps({"type": "error", "message": error_msg}) + "\n"
         return
 
@@ -227,8 +209,6 @@ def run_schedule_optimization(schedule_id: int, num_candidates: int = 5):
                 f"x_{m_id}_{d_id}_{s_id}_{i}", 0, 1, lp.LpBinary
             )
 
-        # 🟢 NEW STRUCTURE: Store penalty REASONS
-        # member_penalties[m.id] = [ { "w": weight, "v": lpVar/expr, "r": "Reason" }, ... ]
         member_penalties = {m.id: [] for m in members}
         solver_objective_terms = []
 
@@ -279,12 +259,11 @@ def run_schedule_optimization(schedule_id: int, num_candidates: int = 5):
                 if vars_curr and vars_next:
                     prob += lp.lpSum(vars_curr + vars_next) <= 1
 
-        # 🟢 4b. No Back-To-Back (Lookback Transition)
+        # 4b. No Back-To-Back (Lookback Transition)
         for m in members:
             for day in active_days:
                 prev_date = day.date - timedelta(days=1)
                 if (m.id, prev_date) in history_work_map:
-                    # They worked yesterday (in lookback), so enforce 0 today
                     daily_vars = [
                         X[(m.id, day.id, s.id)]
                         for s in stations
@@ -323,21 +302,25 @@ def run_schedule_optimization(schedule_id: int, num_candidates: int = 5):
             ]
             actual_points = lp.lpSum([v * w for v, w in m_vars])
             target = quota_targets.get(m.id, 0.0)
+
             excess = lp.LpVariable(f"exc_{m.id}_{i}", 0)
             shortage = lp.LpVariable(f"sht_{m.id}_{i}", 0)
+
             prob += actual_points - target == excess - shortage
+
             prio = get_member_priority(m)
 
-            cost = (excess + shortage) * (sw_quota + sw_goal) * prio
-            solver_objective_terms.append(cost)
+            # Asymmetric weights (Excess is 2x worse)
+            cost_shortage = shortage * (sw_quota) * prio
+            cost_excess = excess * (sw_quota * 2.0) * prio
 
-            # 🟢 Track Reason
+            solver_objective_terms.append(cost_shortage + cost_excess)
+
             member_penalties[m.id].append(
-                {
-                    "w": (sw_quota + sw_goal) * prio,
-                    "v": excess + shortage,
-                    "r": "Quota Deviation",
-                }
+                {"w": sw_quota * prio, "v": shortage, "r": "Quota Deviation"}
+            )
+            member_penalties[m.id].append(
+                {"w": sw_quota * 2.0 * prio, "v": excess, "r": "Quota (Over)"}
             )
 
         # 2. Spacing (1 Day)
@@ -355,14 +338,11 @@ def run_schedule_optimization(schedule_id: int, num_candidates: int = 5):
                     is_gap = lp.LpVariable(f"g1_{m.id}_{d1}_{i}", 0, 1, lp.LpBinary)
                     prob += is_gap >= lp.lpSum(vars_d1 + vars_d3) - 1
                     prio = get_member_priority(m)
-
                     solver_objective_terms.append(is_gap * sw_spacing1 * prio)
-                    # 🟢 Track Reason
                     member_penalties[m.id].append(
                         {"w": sw_spacing1 * prio, "v": is_gap, "r": "1-Day Spacing"}
                     )
-
-            # Check Spacing against Lookback
+            # Lookback spacing
             for day in active_days:
                 date_minus_2 = day.date - timedelta(days=2)
                 if (m.id, date_minus_2) in history_work_map:
@@ -375,7 +355,6 @@ def run_schedule_optimization(schedule_id: int, num_candidates: int = 5):
                         prio = get_member_priority(m)
                         term = lp.lpSum(vars_today) * sw_spacing1 * prio
                         solver_objective_terms.append(term)
-                        # 🟢 Track Reason (using the expression directly)
                         member_penalties[m.id].append(
                             {
                                 "w": sw_spacing1 * prio,
@@ -402,9 +381,7 @@ def run_schedule_optimization(schedule_id: int, num_candidates: int = 5):
                         )
                         prob += is_gap2 >= lp.lpSum(vars_d1 + vars_d4) - 1
                         prio = get_member_priority(m)
-
                         solver_objective_terms.append(is_gap2 * sw_spacing2 * prio)
-                        # 🟢 Track Reason
                         member_penalties[m.id].append(
                             {
                                 "w": sw_spacing2 * prio,
@@ -436,7 +413,6 @@ def run_schedule_optimization(schedule_id: int, num_candidates: int = 5):
                     solver_objective_terms.append(
                         is_same_weekend * sw_same_weekend * prio
                     )
-                    # 🟢 Track Reason
                     member_penalties[m.id].append(
                         {
                             "w": sw_same_weekend * prio,
@@ -462,7 +438,6 @@ def run_schedule_optimization(schedule_id: int, num_candidates: int = 5):
                 prob += is_cons >= v1 + v2 - 1
                 prio = get_member_priority(m)
                 solver_objective_terms.append(is_cons * sw_consecutive * prio)
-                # 🟢 Track Reason
                 member_penalties[m.id].append(
                     {
                         "w": sw_consecutive * prio,
@@ -471,11 +446,71 @@ def run_schedule_optimization(schedule_id: int, num_candidates: int = 5):
                     }
                 )
 
+        # 6. STATION GOAL (BALANCE) PENALTY
+        for m in members:
+            all_m_vars = [var for (m_id, d_id, s_id), var in X.items() if m_id == m.id]
+
+            if not all_m_vars:
+                continue
+
+            total_shifts_var = lp.lpSum(all_m_vars)
+
+            raw_weights = m.station_weights or []
+            weight_map = {}
+            for w in raw_weights:
+                if hasattr(w, "station_id") and hasattr(w, "weight"):
+                    weight_map[int(w.station_id)] = float(w.weight)
+                elif isinstance(w, dict):
+                    weight_map[int(w.get("station_id"))] = float(w.get("weight", 0))
+
+            q_ids = {int(q.station_id) for q in m.person.qualifications}
+
+            total_config_weight = 0.0
+            target_weights = {}
+
+            for s in stations:
+                if int(s.station_id) in q_ids:
+                    w_val = weight_map.get(int(s.station_id), 1.0)
+                    total_config_weight += w_val
+                    target_weights[int(s.station_id)] = w_val
+
+            if total_config_weight <= 0:
+                continue
+
+            for s in stations:
+                if int(s.station_id) not in q_ids:
+                    continue
+
+                target_ratio = target_weights[int(s.station_id)] / total_config_weight
+
+                station_vars = [
+                    var
+                    for (m_id, d_id, s_id), var in X.items()
+                    if m_id == m.id and s_id == s.station_id
+                ]
+                actual_station_count = lp.lpSum(station_vars)
+
+                diff_expr = actual_station_count - (total_shifts_var * target_ratio)
+                pos_dev = lp.LpVariable(f"sdev_{m.id}_{s.station_id}_{i}", 0)
+
+                prob += pos_dev >= diff_expr
+                prob += pos_dev >= -diff_expr
+
+                prio = get_member_priority(m)
+
+                solver_objective_terms.append(pos_dev * sw_goal * prio)
+                member_penalties[m.id].append(
+                    {
+                        "w": sw_goal * prio,
+                        "v": pos_dev,
+                        "r": "goal_deviation",
+                    }
+                )
+
         # F. Minimax Equity
         max_penalty = lp.LpVariable(f"MaxPen_{i}", 0)
         for m in members:
             if member_penalties[m.id]:
-                # Updated to use dictionary structure
                 m_total = lp.lpSum(
                     [item["w"] * item["v"] for item in member_penalties[m.id]]
                 )
@@ -505,30 +540,36 @@ def run_schedule_optimization(schedule_id: int, num_candidates: int = 5):
                 pen_breakdown = {}
                 indiv_pen = 0.0
 
-                # 🟢 EXTRACT BREAKDOWN
                 for item in member_penalties[m.id]:
                     val = lp.value(item["v"])
                     if val and val > 0.01:
                         points = val * item["w"]
                         indiv_pen += points
-                        # Group by reason
                         reason = item["r"]
                         pen_breakdown[reason] = pen_breakdown.get(reason, 0) + points
 
-                # Round breakdowns for clean JSON
                 pen_breakdown = {k: round(v, 2) for k, v in pen_breakdown.items()}
                 total_pen += indiv_pen
 
-                assigned_ids = [k for k, v in assignment_map.items() if v == m.id]
+                # 🟢 FILTER ASSIGNMENTS FOR METRICS (Exclude Lookback)
+                assigned_ids = [
+                    k
+                    for k, v in assignment_map.items()
+                    if v == m.id and int(k.split("_")[0]) in active_day_ids
+                ]
+
+                # Count only Active Days
                 assigned_count = len(assigned_ids)
+
+                # Sum Points only for Active Days (Safe because active_day_ids are guaranteed to have weights)
                 points = sum(
-                    day_weight_map.get(int(k.split("_")[0]), 1.0) for k in assigned_ids
+                    day_weight_map.get(int(k.split("_")[0]), 0.0) for k in assigned_ids
                 )
 
                 metric_data[m.person.name] = {
                     "member_id": m.id,
                     "goat_points": round(indiv_pen, 2),
-                    "breakdown": pen_breakdown,  # <--- NEW FIELD FOR TOOLTIPS
+                    "breakdown": pen_breakdown,
                     "assigned": assigned_count,
                     "points": round(points, 2),
                     "quota_target": round(quota_targets.get(m.id, 0), 2),
