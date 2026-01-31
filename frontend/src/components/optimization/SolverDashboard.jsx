@@ -16,8 +16,7 @@ export default function SolverDashboard({
     masterStations,
     memberships = [],
     days = [],
-    // 🟢 CRITICAL: This prop triggers the "Yellow/Modified" state
-    scheduleUpdatedAt
+    scheduleUpdatedAt // Trigger for yellow "modified" state
 }) {
     const [loading, setLoading] = useState(false);
     const [clearing, setClearing] = useState(false);
@@ -26,47 +25,38 @@ export default function SolverDashboard({
     const [progress, setProgress] = useState(0);
     const [statusMessage, setStatusMessage] = useState("");
 
-    // 🟢 STATE: Track Active Candidate and Modification Status
+    // State for tracking active candidate & modifications
     const [activeCandidateId, setActiveCandidateId] = useState(null);
     const [isModified, setIsModified] = useState(false);
-
-    // Track if WE caused the update (to prevent turning yellow immediately)
     const isApplyingRef = useRef(false);
 
-    // 🟢 1. LOAD STATE FROM STORAGE ON MOUNT (Fixes the reset issue)
+    // 1. Restore Active Candidate from LocalStorage on mount
     useEffect(() => {
         if (!scheduleId) return;
         const savedId = localStorage.getItem(`activeCandidate_${scheduleId}`);
         if (savedId) {
-            console.log("Restoring Active Candidate:", savedId);
             setActiveCandidateId(Number(savedId));
         }
     }, [scheduleId]);
 
-    // 🟢 2. DETECT MANUAL CHANGES
+    // 2. Detect Manual Changes (Switch to Yellow)
     useEffect(() => {
-        // If the schedule data is missing, do nothing
         if (!scheduleUpdatedAt) return;
-
-        // If we are currently applying a candidate, ignore this update (it's ours)
         if (isApplyingRef.current) {
-            console.log("Update caused by Apply - Keeping Blue state");
-            isApplyingRef.current = false; // Reset flag
+            isApplyingRef.current = false; // Ignore updates caused by us
             return;
         }
-
-        // If we have an active candidate and the schedule refreshed from the outside...
         if (activeCandidateId !== null) {
-            console.log("External Update Detected - Switching to Yellow state");
-            setIsModified(true);
+            setIsModified(true); // Mark as modified if external update occurs
         }
-    }, [scheduleUpdatedAt]); // 🟢 This now fires whenever the 'schedule' object changes
+    }, [scheduleUpdatedAt]);
 
-    // Filter Active Days
+    // Filter Active Day IDs
     const activeDayIds = useMemo(() => {
         return days.filter(d => !d.is_lookback).map(d => d.id);
     }, [days]);
 
+    // Fetch existing candidates (load on start)
     const fetchCandidates = async () => {
         try {
             const res = await axios.get(`/api/schedules/${scheduleId}/candidates`);
@@ -76,16 +66,16 @@ export default function SolverDashboard({
 
     useEffect(() => { if (scheduleId) fetchCandidates(); }, [scheduleId]);
 
+    // --- MAIN SOLVER LOGIC ---
     const handleRunSolver = async () => {
-        setLoading(true); setProgress(0); setStatusMessage("Initializing..."); setError(null);
-
-        // Reset State on new run
-        setActiveCandidateId(null);
-        setIsModified(false);
-        localStorage.removeItem(`activeCandidate_${scheduleId}`);
+        setLoading(true);
+        setProgress(0);
+        setStatusMessage("Initializing...");
+        setCandidates([]); // Clear UI immediately
 
         try {
-            const response = await fetch(`/api/schedules/${scheduleId}/generate`, {
+            // 🟢 USE DIRECT URL: Bypasses the React Proxy buffer
+            const response = await fetch(`http://127.0.0.1:5000/api/schedules/${scheduleId}/generate`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ num_candidates: 5 })
@@ -98,26 +88,41 @@ export default function SolverDashboard({
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
+
                 buffer += decoder.decode(value, { stream: true });
                 const lines = buffer.split('\n');
-                buffer = lines.pop();
+                buffer = lines.pop(); // Keep incomplete chunk in buffer
+
                 for (const line of lines) {
                     if (!line.trim()) continue;
                     try {
-                        const data = JSON.parse(line);
+                        const data = JSON.parse(line.trim());
+
                         if (data.type === 'progress') {
                             setProgress(data.percent);
                             setStatusMessage(data.message);
-                        } else if (data.type === 'complete') {
-                            setStatusMessage("Optimization Complete!");
-                            fetchCandidates();
-                        } else if (data.type === 'error') {
-                            setError(data.message);
+                            // Tiny pause to let the progress bar animate
+                            await new Promise(r => setTimeout(r, 0));
                         }
-                    } catch (e) { console.error(e); }
+                        else if (data.type === 'candidate') {
+                            setCandidates(prev => {
+                                // Prevent duplicates
+                                if (prev.some(c => c.id === data.candidate.id)) return prev;
+                                return [...prev, data.candidate];
+                            });
+
+                            // 🟢 PAINT BRAKE: Pause 50ms to let the browser draw the card
+                            await new Promise(resolve => setTimeout(resolve, 50));
+                        }
+                        else if (data.type === 'complete') {
+                            // Sync with DB at the end just to be safe
+                            fetchCandidates();
+                        }
+                    } catch (e) { console.error("Parse error:", e); }
                 }
             }
         } catch (error) {
+            console.error("Solver Error:", error);
             setError("Failed to connect to solver.");
         } finally { setLoading(false); }
     };
@@ -125,39 +130,31 @@ export default function SolverDashboard({
     const handleClearSchedule = async () => {
         if (!window.confirm("Are you sure? This removes all unlocked assignments.")) return;
         setClearing(true);
-
-        // Reset State
         setActiveCandidateId(null);
         setIsModified(false);
         localStorage.removeItem(`activeCandidate_${scheduleId}`);
 
         try {
             await axios.post(`/api/schedules/${scheduleId}/clear`);
-            setCandidates([]);
+            setCandidates([]); // Clear UI
             if (onScheduleUpdated) onScheduleUpdated();
         } catch (e) { setError("Failed to clear schedule."); } finally { setClearing(false); }
     };
 
     const handleApplyCandidate = async (candidateId) => {
         setLoading(true);
-
-        // 🟢 SET FLAG: We are about to update the schedule
-        isApplyingRef.current = true;
+        isApplyingRef.current = true; // Flag to ignore the upcoming update event
 
         try {
             await axios.post(`/api/schedules/${scheduleId}/apply`, { candidate_id: candidateId });
-
-            console.log("Applied Candidate:", candidateId);
-
-            // 🟢 UPDATE STATE & SAVE
             setActiveCandidateId(candidateId);
-            setIsModified(false);
+            setIsModified(false); // Reset to Blue state
             localStorage.setItem(`activeCandidate_${scheduleId}`, candidateId);
 
             if (onScheduleUpdated) onScheduleUpdated();
         } catch (err) {
             setError("Failed to apply schedule.");
-            isApplyingRef.current = false; // Reset on error
+            isApplyingRef.current = false;
         } finally { setLoading(false); }
     };
 
@@ -168,9 +165,6 @@ export default function SolverDashboard({
                     <AutoAwesomeIcon color="primary" sx={{ mr: 1, fontSize: 30 }} />
                     <Typography variant="h6">AI Schedule Generator</Typography>
                 </Box>
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-                    The solver will generate 5 unique versions of the watchbill using your settings.
-                </Typography>
 
                 {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
@@ -183,7 +177,7 @@ export default function SolverDashboard({
                             startIcon={loading ? <CircularProgress size={20} color="inherit" /> : <RefreshIcon />}
                             onClick={handleRunSolver}
                             disabled={loading || clearing}
-                            sx={{ height: '100%', whiteSpace: 'nowrap' }}
+                            sx={{ height: '100%' }}
                         >
                             {loading ? "Working..." : "Run Solver"}
                         </Button>
@@ -198,7 +192,7 @@ export default function SolverDashboard({
                                     fullWidth
                                     onClick={handleClearSchedule}
                                     disabled={loading || clearing}
-                                    sx={{ height: '100%', minWidth: '40px' }}
+                                    sx={{ height: '100%' }}
                                 >
                                     {clearing ? <CircularProgress size={20} /> : <DeleteSweepIcon />}
                                 </Button>
@@ -210,7 +204,7 @@ export default function SolverDashboard({
                 {loading && (
                     <Box sx={{ width: '100%', mt: 1 }}>
                         <Box display="flex" justifyContent="space-between" mb={1}>
-                            <Typography variant="caption" color="text.secondary">{statusMessage}</Typography>
+                            <Typography variant="caption">{statusMessage}</Typography>
                             <Typography variant="caption" fontWeight="bold">{progress}%</Typography>
                         </Box>
                         <LinearProgress variant="determinate" value={progress} sx={{ height: 8, borderRadius: 4 }} />
@@ -218,15 +212,18 @@ export default function SolverDashboard({
                 )}
             </Paper>
 
-            {candidates.length > 0 && !loading && (
+            {/* 🟢 CRITICAL FIX: Removed '!loading' check. Cards now show immediately. */}
+            {candidates.length > 0 && (
                 <Box sx={{ mt: 4 }}>
-                    <Typography variant="subtitle1" fontWeight="bold" gutterBottom>Generated Options</Typography>
+                    <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
+                        Generated Options
+                        {loading && <span style={{ opacity: 0.5, fontSize: '0.8em' }}> (Streaming...)</span>}
+                    </Typography>
+
                     <Stack direction="row" spacing={2} sx={{ overflowX: 'auto', pb: 2, px: 1, pt: 2 }}>
                         {candidates.map((cand, index) => {
-                            // 🟢 DETERMINE STATUS FOR CARD
+                            // Logic for Blue/Yellow status
                             let status = 'none';
-
-                            // Ensure type safety (IDs might be string vs number)
                             if (String(cand.id) === String(activeCandidateId)) {
                                 status = isModified ? 'changes' : 'displayed';
                             }
@@ -236,14 +233,10 @@ export default function SolverDashboard({
                                     key={cand.id}
                                     candidate={cand}
                                     isBest={index === 0}
-
-                                    // 🟢 PASS STATUS
                                     displayStatus={status}
-
                                     masterStations={masterStations}
                                     memberships={memberships}
                                     activeDayIds={activeDayIds}
-
                                     onApply={handleApplyCandidate}
                                     onToggleHighlight={onToggleHighlight}
                                 />

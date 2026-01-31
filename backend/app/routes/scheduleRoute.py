@@ -204,13 +204,19 @@ def generate_candidates(id):
     data = request.get_json() or {}
     num_candidates = data.get("num_candidates", 5)
 
-    def generate():
-        # Call the generator service
-        # We assume run_schedule_optimization is now a generator
-        for chunk in run_schedule_optimization(id, num_candidates=num_candidates):
-            yield chunk
+    response = Response(
+        stream_with_context(
+            run_schedule_optimization(id, num_candidates=num_candidates)
+        ),
+        mimetype="application/x-ndjson",  # 🟢 Use a streaming-friendly MIME type
+    )
 
-    return Response(stream_with_context(generate()), mimetype="application/x-ndjson")
+    # 🟢 CRITICAL: Disable Buffering & Compression
+    # This tells Nginx/Flask/Gunicorn: "Send it raw, right now."
+    response.headers["X-Accel-Buffering"] = "no"
+    response.headers["Cache-Control"] = "no-cache"
+    response.headers["Content-Encoding"] = "none"
+    return response
 
 
 @schedule_bp.route("/schedules/<int:id>/candidates", methods=["GET"])

@@ -33,6 +33,7 @@ def run_schedule_optimization(schedule_id: int, num_candidates: int = 5):
     yield json.dumps(
         {"type": "progress", "percent": 0, "message": "Clearing previous data..."}
     ) + "\n"
+
     db.session.execute(
         delete(ScheduleCandidate).where(ScheduleCandidate.schedule_id == schedule_id)
     )
@@ -60,7 +61,7 @@ def run_schedule_optimization(schedule_id: int, num_candidates: int = 5):
     days = db.session.scalars(stmt_days).all()
     active_days = [d for d in days if not d.is_lookback]
 
-    # 🟢 NEW: Create a set of Active Day IDs for O(1) filtering later
+    # Create a set of Active Day IDs for O(1) filtering later
     active_day_ids = {d.id for d in active_days}
 
     # Fetch Members
@@ -519,7 +520,23 @@ def run_schedule_optimization(schedule_id: int, num_candidates: int = 5):
         prob += lp.lpSum(solver_objective_terms) + (100.0 * max_penalty)
 
         # --- SOLVE ---
-        prob.solve(lp.PULP_CBC_CMD(msg=0, timeLimit=2, gapRel=0.05))
+        # Scale time: 2s -> 5s -> 10s -> 15s -> 20s
+        dynamic_time = int(2 + (i * 4.5))
+
+        # Scale precision: 5% -> 4% -> 3% -> 1% -> 0%
+        dynamic_gap = max(0.0, 0.05 - (i * 0.012))
+
+        # Update the progress message to let the user know this one is thinking harder
+        yield json.dumps(
+            {
+                "type": "progress",
+                "percent": percent,
+                "message": f"Solving Iteration {i+1} (Targeting {int(dynamic_gap*100)}% gap)...",
+            }
+        ) + "\n"
+
+        # Solve with the dynamic limits
+        prob.solve(lp.PULP_CBC_CMD(msg=0, timeLimit=dynamic_time, gapRel=dynamic_gap))
 
         # --- SAVE ---
         is_valid = (prob.status == lp.LpStatusOptimal) or (
@@ -551,7 +568,7 @@ def run_schedule_optimization(schedule_id: int, num_candidates: int = 5):
                 pen_breakdown = {k: round(v, 2) for k, v in pen_breakdown.items()}
                 total_pen += indiv_pen
 
-                # 🟢 FILTER ASSIGNMENTS FOR METRICS (Exclude Lookback)
+                # Filter Assignments (Exclude Lookback from count)
                 assigned_ids = [
                     k
                     for k, v in assignment_map.items()
@@ -561,7 +578,7 @@ def run_schedule_optimization(schedule_id: int, num_candidates: int = 5):
                 # Count only Active Days
                 assigned_count = len(assigned_ids)
 
-                # Sum Points only for Active Days (Safe because active_day_ids are guaranteed to have weights)
+                # Sum Points only for Active Days
                 points = sum(
                     day_weight_map.get(int(k.split("_")[0]), 0.0) for k in assigned_ids
                 )
@@ -586,7 +603,25 @@ def run_schedule_optimization(schedule_id: int, num_candidates: int = 5):
             db.session.add(cand)
             generated_candidates.append(cand)
 
-        db.session.commit()
+            db.session.commit()
+
+            # 🟢 FORCE FLUSH with whitespace padding
+            padding = " " * 4096
+
+            yield json.dumps(
+                {
+                    "type": "candidate",
+                    "candidate": {
+                        "id": cand.id,
+                        "run_id": cand.run_id,
+                        "score": cand.score,
+                        "assignments_data": cand.assignments_data,
+                        "metrics_data": cand.metrics_data,
+                        "created_at": str(cand.created_at) if cand.created_at else None,
+                    },
+                    "message": f"Found Option {i+1} (Score: {cand.score})",
+                }
+            ) + padding + "\n"
 
     yield json.dumps(
         {"type": "complete", "run_id": run_id, "count": len(generated_candidates)}

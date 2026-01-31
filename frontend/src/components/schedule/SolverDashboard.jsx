@@ -63,17 +63,26 @@ export default function SolverDashboard({
     }, [scheduleUpdatedAt, activeCandidateId]);
 
     const handleRunSolver = async () => {
-        setLoading(true); setProgress(0); setStatusMessage("Initializing..."); setError(null);
+        setLoading(true);
+        setProgress(0);
+        setStatusMessage("Initializing...");
+        setError(null);
+
+        // Reset State
         setActiveCandidateId(null);
         setIsModified(false);
+        localStorage.removeItem(`activeCandidate_${scheduleId}`);
+
+        // 🟢 NEW: Clear old cards so the UI is empty for the new run
+        setCandidates([]);
 
         try {
-            const response = await fetch(`/api/schedules/${scheduleId}/generate`, {
+            const response = await fetch(`http://127.0.0.1:5000/api/schedules/${scheduleId}/generate`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ num_candidates: 5 })
             });
-            // ... (rest of streaming logic is same) ...
+
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
             let buffer = '';
@@ -87,13 +96,25 @@ export default function SolverDashboard({
                 for (const line of lines) {
                     if (!line.trim()) continue;
                     try {
-                        const data = JSON.parse(line);
+                        const data = JSON.parse(line.trim());
                         if (data.type === 'progress') {
                             setProgress(data.percent);
                             setStatusMessage(data.message);
+
+                        } else if (data.type === 'candidate') {
+                            // 🟢 NEW: Add the candidate to the screen INSTANTLY
+                            setCandidates(prev => {
+                                // Safety check to prevent duplicates
+                                if (prev.some(c => c.id === data.candidate.id)) return prev;
+                                return [...prev, data.candidate];
+                            });
+
                         } else if (data.type === 'complete') {
                             setStatusMessage("Optimization Complete!");
+                            // We don't need to fetchCandidates() anymore because we streamed them!
+                            // But running it once at the end is a safe sync.
                             fetchCandidates();
+
                         } else if (data.type === 'error') {
                             setError(data.message);
                         }
@@ -104,7 +125,6 @@ export default function SolverDashboard({
             setError("Failed to connect to solver.");
         } finally { setLoading(false); }
     };
-
     const handleClearSchedule = async () => {
         if (!window.confirm("Are you sure? This removes all unlocked assignments.")) return;
         setClearing(true);
@@ -187,10 +207,14 @@ export default function SolverDashboard({
                 {/* ... (Progress Bar same as before) ... */}
             </Paper>
 
-            {candidates.length > 0 && !loading && (
+            {candidates.length > 0 && (
                 <Box sx={{ mt: 4 }}>
-                    <Typography variant="subtitle1" fontWeight="bold" gutterBottom>Generated Options</Typography>
-                    <Stack direction="row" spacing={2} sx={{ overflowX: 'auto', pb: 2, px: 1, pt: 1 }}> {/* Added pt:1 for top chips */}
+                    <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
+                        Generated Options
+                        {loading && <span style={{ opacity: 0.5, fontSize: '0.8em' }}> (Streaming...)</span>}
+                    </Typography>
+
+                    <Stack direction="row" spacing={2} sx={{ overflowX: 'auto', pb: 2, px: 1, pt: 2 }}>
                         {candidates.map((cand, index) => {
                             // 🟢 DETERMINE STATUS FOR CARD
                             let status = 'none';
